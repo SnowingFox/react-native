@@ -41,6 +41,7 @@ module.exports.getCacheKey = () => {
     readFileSync(require.resolve('./configs/lazy-imports.js')),
     readFileSync(require.resolve('./passthrough-syntax-plugins.js')),
     readFileSync(require.resolve('./plugin-warn-on-deep-imports.js')),
+    readFileSync(require.resolve('./inline-platform-plugin.js')),
   ].forEach(part => key.update(part));
   cacheKey = key.digest('hex');
   return cacheKey;
