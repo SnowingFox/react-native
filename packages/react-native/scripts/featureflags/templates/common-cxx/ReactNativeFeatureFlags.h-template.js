@@ -27,6 +27,8 @@ ${DO_NOT_MODIFY_COMMENT}
 
 #pragma once
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
 #include <react/featureflags/ReactNativeFeatureFlagsAccessor.h>
 #include <react/featureflags/ReactNativeFeatureFlagsProvider.h>
 #include <memory>

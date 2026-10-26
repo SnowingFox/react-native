@@ -11,6 +11,7 @@
 'use strict';
 
 const {
+  download,
   exists,
   extractXCFramework,
   findFirst,
@@ -18,11 +19,13 @@ const {
   formatBytes,
   formatSpeed,
   hermesReleaseUrls,
+  isMavenArtifactVersionPublished,
   mavenRepositoryUrls,
   reactNativeMavenMirrorEnabled,
   resolveCacheSlotVersion,
   resolveHermesArtifact,
   resolveLatestV1Version,
+  resolveLocalHermesCompilerVersion,
   resolveNightlyVersion,
   resolveRNCoreArtifact,
   resolveRNDepsArtifact,
@@ -95,6 +98,67 @@ function routerFetch(routes /*: {[string]: any} */) {
 // artifact at the RN nightly version (which won't exist on Maven).
 // ---------------------------------------------------------------------------
 
+// Creates a scratch dir with (optionally) a `node_modules/hermes-compiler`
+// package inside it, mimicking a real project root for
+// resolveLocalHermesCompilerVersion()'s require.resolve({paths: [rnRoot]}).
+function makeFakeRnRoot(hermesCompilerVersion /*: ?string */) /*: string */ {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rn-root-'));
+  if (hermesCompilerVersion != null) {
+    const pkgDir = path.join(root, 'node_modules', 'hermes-compiler');
+    fs.mkdirSync(pkgDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(pkgDir, 'package.json'),
+      JSON.stringify({name: 'hermes-compiler', version: hermesCompilerVersion}),
+    );
+  }
+  return root;
+}
+
+// Forces resolveLocalHermesCompilerVersion() to behave as if hermes-compiler
+// isn't installed, regardless of any workspace-hoisted hermes-compiler the host
+// environment provides. Jest's require.resolve ignores the {paths: [rnRoot]}
+// scoping and still finds the hoisted package, so stubbing module resolution is
+// ineffective here; instead we stub fs.readFileSync to throw MODULE_NOT_FOUND
+// for the resolved hermes-compiler/package.json — the exact signal a genuine
+// resolution miss produces — which drives the function down its "not installed"
+// branch. Reads of any other file fall through to the real implementation.
+// Undo with jest.restoreAllMocks().
+function mockHermesCompilerUnresolvable() {
+  const realReadFileSync = fs.readFileSync;
+  jest.spyOn(fs, 'readFileSync').mockImplementation((file, ...rest) => {
+    if (String(file).includes(`${path.sep}hermes-compiler${path.sep}`)) {
+      const error = new Error(
+        "Cannot find module 'hermes-compiler/package.json'",
+      );
+      error.code = 'MODULE_NOT_FOUND';
+      throw error;
+    }
+    return realReadFileSync.call(fs, file, ...rest);
+  });
+}
+
+describe('resolveLocalHermesCompilerVersion', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('reads the version from the locally installed hermes-compiler package', () => {
+    const root = makeFakeRnRoot('0.13.7');
+    expect(resolveLocalHermesCompilerVersion(root)).toBe('0.13.7');
+  });
+
+  it('returns null when no hermes-compiler is resolvable from the given root', () => {
+    // Resolve from a real, isolated scratch root that has no hermes-compiler
+    // installed (same setup as the fallback test below) so require.resolve
+    // stays scoped to that root and misses, rather than falling back to
+    // whatever hermes-compiler the host environment happens to hoist. The
+    // function must report absence rather than fabricating a version.
+    const root = makeFakeRnRoot(null);
+    mockHermesCompilerUnresolvable();
+    expect(resolveLocalHermesCompilerVersion(root)).toBeNull();
+  });
+});
+
 describe('resolveHermesArtifact', () => {
   let origFetch;
   let origHermesEnv;
@@ -112,6 +176,7 @@ describe('resolveHermesArtifact', () => {
     } else {
       delete process.env.HERMES_VERSION;
     }
+    jest.restoreAllMocks();
   });
 
   // Mock fetch with a router: each entry's key is a URL substring; the value
@@ -122,43 +187,74 @@ describe('resolveHermesArtifact', () => {
   }
 
   describe('default behavior (no HERMES_VERSION set)', () => {
-    it('resolves to the latest-v1 hermes-compiler dist-tag, NOT the RN version', async () => {
+    it('uses the locally pinned hermes-compiler version, without hitting npm', async () => {
+      const rnRoot = makeFakeRnRoot('0.13.7');
+      mockFetch({
+        'hermes-ios/0.13.7/hermes-ios-0.13.7': {ok: true},
+      });
+      const result = await resolveHermesArtifact(
+        '0.87.0-nightly-20260519-58cd1bf58',
+        'debug',
+        null,
+        rnRoot,
+      );
+      expect(result.version).toBe('0.13.7');
+      expect(result.url).toContain('/0.13.7/');
+      // Must resolve straight from node_modules — no npm registry round trip.
+      expect(globalThis.fetch).not.toHaveBeenCalledWith(
+        expect.stringContaining('registry.npmjs.org'),
+        expect.anything(),
+      );
+    });
+
+    it('ignores rawVersion (the RN --version arg) when HERMES_VERSION is unset', async () => {
+      const rnRoot = makeFakeRnRoot('0.13.7');
+      mockFetch({
+        'hermes-ios/0.13.7/hermes-ios-0.13.7': {ok: true},
+      });
+      // Caller passes the original RN --version verbatim; hermes should
+      // still use the locally pinned version instead of using this.
+      const result = await resolveHermesArtifact(
+        '0.87.0-nightly-20260519-58cd1bf58',
+        'debug',
+        '0.87.0-nightly-20260519-58cd1bf58',
+        rnRoot,
+      );
+      expect(result.version).toBe('0.13.7');
+      expect(result.url).not.toContain('20260519');
+    });
+
+    it('falls back to the latest-v1 npm dist-tag when hermes-compiler is not locally installed', async () => {
+      const rnRoot = makeFakeRnRoot(null);
+      // Stub require.resolve to fail so the local lookup is guaranteed to miss,
+      // even in environments that hoist a workspace hermes-compiler. The
+      // resolver must then fall through to the latest-v1 dist-tag (0.13.0).
+      mockHermesCompilerUnresolvable();
       mockFetch({
         'hermes-compiler/latest-v1': {json: {version: '0.13.0'}},
-        // Pretend the release URL exists once we ask for 0.13.0.
         'hermes-ios/0.13.0/hermes-ios-0.13.0': {ok: true},
       });
       const result = await resolveHermesArtifact(
         '0.87.0-nightly-20260519-58cd1bf58',
         'debug',
         null,
+        rnRoot,
       );
       expect(result.version).toBe('0.13.0');
       expect(result.url).toContain('/0.13.0/');
-      // The RN nightly hash MUST NOT leak into the hermes URL.
-      expect(result.url).not.toContain('20260519');
-    });
-
-    it('ignores rawVersion (the RN --version arg) when HERMES_VERSION is unset', async () => {
-      mockFetch({
-        'hermes-compiler/latest-v1': {json: {version: '0.13.0'}},
-        'hermes-ios/0.13.0/hermes-ios-0.13.0': {ok: true},
-      });
-      // Caller passes the original RN --version verbatim; hermes should
-      // still default to latest-v1 instead of using this.
-      const result = await resolveHermesArtifact(
-        '0.87.0-nightly-20260519-58cd1bf58',
-        'debug',
-        '0.87.0-nightly-20260519-58cd1bf58',
+      // Confirm the dist-tag lookup actually ran — the fallback path, not a
+      // locally pinned version, produced this result.
+      const hitLatestV1 = globalThis.fetch.mock.calls.some(([url]) =>
+        String(url).includes('hermes-compiler/latest-v1'),
       );
-      expect(result.version).toBe('0.13.0');
-      expect(result.url).not.toContain('20260519');
+      expect(hitLatestV1).toBe(true);
     });
   });
 
   describe('HERMES_VERSION escape hatches', () => {
-    it('HERMES_VERSION=<literal-version> uses it verbatim', async () => {
+    it('HERMES_VERSION=<literal-version> uses it verbatim, even with a local package installed', async () => {
       process.env.HERMES_VERSION = '0.13.5';
+      const rnRoot = makeFakeRnRoot('0.13.7');
       mockFetch({
         'hermes-ios/0.13.5/hermes-ios-0.13.5': {ok: true},
       });
@@ -166,13 +262,15 @@ describe('resolveHermesArtifact', () => {
         '0.87.0-nightly-anything',
         'debug',
         null,
+        rnRoot,
       );
       expect(result.version).toBe('0.13.5');
       expect(result.url).toContain('/0.13.5/');
     });
 
-    it('HERMES_VERSION=latest-v1 resolves via npm dist-tag', async () => {
+    it('HERMES_VERSION=latest-v1 resolves via npm dist-tag, even with a local package installed', async () => {
       process.env.HERMES_VERSION = 'latest-v1';
+      const rnRoot = makeFakeRnRoot('0.13.7');
       mockFetch({
         'hermes-compiler/latest-v1': {json: {version: '0.13.0'}},
         'hermes-ios/0.13.0/hermes-ios-0.13.0': {ok: true},
@@ -181,12 +279,14 @@ describe('resolveHermesArtifact', () => {
         '0.87.0-nightly-anything',
         'debug',
         null,
+        rnRoot,
       );
       expect(result.version).toBe('0.13.0');
     });
 
     it('HERMES_VERSION=nightly resolves hermes-compiler@nightly from npm', async () => {
       process.env.HERMES_VERSION = 'nightly';
+      const rnRoot = makeFakeRnRoot(null);
       mockFetch({
         'hermes-compiler/nightly': {json: {version: '0.14.0-nightly-abc'}},
         'hermes-ios/0.14.0-nightly-abc/hermes-ios-0.14.0-nightly-abc': {
@@ -197,12 +297,14 @@ describe('resolveHermesArtifact', () => {
         '0.87.0-nightly-anything',
         'debug',
         null,
+        rnRoot,
       );
       expect(result.version).toBe('0.14.0-nightly-abc');
     });
 
     it('falls back to the hermes snapshot URL when the release is missing', async () => {
       process.env.HERMES_VERSION = '0.13.5';
+      const rnRoot = makeFakeRnRoot(null);
       globalThis.fetch = jest.fn(async (url, opts) => {
         if (opts && opts.method === 'HEAD') {
           return {status: 404};
@@ -215,7 +317,12 @@ describe('resolveHermesArtifact', () => {
             '<buildNumber>2</buildNumber></metadata>',
         };
       });
-      const result = await resolveHermesArtifact('0.87.0', 'debug', null);
+      const result = await resolveHermesArtifact(
+        '0.87.0',
+        'debug',
+        null,
+        rnRoot,
+      );
       expect(result.url).toContain('maven-snapshots');
       expect(result.url).toContain('hermes-ios-debug.tar.gz');
     });
@@ -272,6 +379,27 @@ describe('mavenRepositoryUrls', () => {
 // ---------------------------------------------------------------------------
 
 describe('release URL builders', () => {
+  it('preserves Maven URLs for the unpublished main version', () => {
+    expect(isMavenArtifactVersionPublished('1000.0.0')).toBe(false);
+    expect(rnCoreReleaseUrls('1000.0.0', 'debug')).toHaveLength(2);
+    expect(rnDepsReleaseUrls('1000.0.0', 'debug')).toHaveLength(2);
+    expect(hermesReleaseUrls('1000.0.0', 'debug')).toHaveLength(2);
+  });
+
+  it('does not probe Maven for the unpublished main version', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = jest.fn();
+
+    try {
+      await expect(
+        exists(rnCoreReleaseUrls('1000.0.0', 'debug')[0]),
+      ).resolves.toBe(false);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('rnCoreReleaseUrls builds a candidate per repository for the reactnative-core classifier', () => {
     const suffix =
       '/com/facebook/react/react-native-artifacts/0.85.0/' +
@@ -419,6 +547,125 @@ describe('exists', () => {
 });
 
 // ---------------------------------------------------------------------------
+// download — retries transient transport failures without masking client errors.
+// ---------------------------------------------------------------------------
+
+describe('download', () => {
+  let originalFetch;
+  let tempDir;
+  let warnSpy;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-download-'));
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    warnSpy.mockRestore();
+    fs.rmSync(tempDir, {recursive: true, force: true});
+  });
+
+  function downloadResponse(body, error, stall = false) {
+    const bytes = Buffer.from(body);
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        get: name =>
+          name.toLowerCase() === 'content-length' ? String(bytes.length) : null,
+      },
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes);
+          if (error != null) {
+            controller.error(error);
+          } else if (!stall) {
+            controller.close();
+          }
+        },
+      }),
+    };
+  }
+
+  it('retries a transient stream failure and replaces the partial download', async () => {
+    globalThis.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        downloadResponse('partial', new Error('terminated')),
+      )
+      .mockResolvedValueOnce(downloadResponse('complete'));
+    const destination = path.join(tempDir, 'artifact.tar.gz');
+
+    const pending = download(
+      'https://example/artifact.tar.gz',
+      destination,
+      () => {},
+    );
+    await jest.advanceTimersByTimeAsync(1_500);
+    await pending;
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('retrying in 1000ms'),
+    );
+    expect(fs.readFileSync(destination, 'utf8')).toBe('complete');
+    expect(fs.existsSync(`${destination}.download`)).toBe(false);
+  });
+
+  it('retries when an otherwise healthy response stops making progress', async () => {
+    jest.useFakeTimers();
+    try {
+      globalThis.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(downloadResponse('partial', null, true))
+        .mockResolvedValueOnce(downloadResponse('complete'));
+      const destination = path.join(tempDir, 'stalled.tar.gz');
+
+      const pending = download(
+        'https://example/stalled.tar.gz',
+        destination,
+        () => {},
+      );
+      await jest.advanceTimersByTimeAsync(61_500);
+      await pending;
+
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('retrying in 1000ms'),
+      );
+      expect(fs.readFileSync(destination, 'utf8')).toBe('complete');
+      expect(fs.existsSync(`${destination}.download`)).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not retry a deterministic HTTP client error', async () => {
+    globalThis.fetch = jest.fn(async () => ({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      headers: {get: () => null},
+      body: null,
+    }));
+    const destination = path.join(tempDir, 'missing.tar.gz');
+
+    await expect(
+      download('https://example/missing.tar.gz', destination, () => {}),
+    ).rejects.toThrow(/HTTP 404/);
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(fs.existsSync(destination)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // resolveSnapshotUrl — parses maven-metadata.xml into a timestamped URL.
 // ---------------------------------------------------------------------------
 
@@ -451,6 +698,20 @@ describe('resolveSnapshotUrl', () => {
     expect(url).toContain(
       'react-native-artifacts-0.85.0-20260101.123456-7-reactnative-core-debug.tar.gz',
     );
+  });
+
+  it('does not query snapshot metadata for the unpublished main version', async () => {
+    globalThis.fetch = jest.fn();
+
+    await expect(
+      resolveSnapshotUrl(
+        '1000.0.0',
+        'react',
+        'react-native-artifacts',
+        'reactnative-core-debug.tar.gz',
+      ),
+    ).rejects.toThrow(/artifacts are not published/);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it('throws when the metadata request fails', async () => {

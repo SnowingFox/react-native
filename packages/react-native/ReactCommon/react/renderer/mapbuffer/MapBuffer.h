@@ -7,13 +7,10 @@
 
 #pragma once
 
-#include <react/debug/react_native_assert.h>
+#include <react/cxxstableapi/UmbrellaGuard.h>
 
-#include <glog/logging.h>
-
+#include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <limits>
 #include <string>
 #include <vector>
 

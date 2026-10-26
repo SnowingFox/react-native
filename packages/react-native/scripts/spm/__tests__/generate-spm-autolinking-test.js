@@ -10,9 +10,11 @@
 
 'use strict';
 
+const {SpmNameCollisionError} = require('../expand-spm-dependencies');
 const {
   AUTOGEN_MARKER,
   MissingManifestError,
+  autolinkingDepToSpmTarget,
   collectSpmSources,
   expandSpmSourceGlobs,
   findSelfManagedPackageDir,
@@ -23,6 +25,7 @@ const {
   linkHeaderTree,
   main,
   reactDescriptor,
+  readDenyPluginsFromConfig,
   reportMissingManifests,
 } = require('../generate-spm-autolinking');
 const fs = require('node:fs');
@@ -280,6 +283,25 @@ describe('generateSynthPackageSwift', () => {
     );
   });
 
+  it('defines its C++ API macros once each, next to the config-gated ABI defines', () => {
+    expect(generateSynthPackageSwift(baseSpec())).not.toMatch(
+      /RN_(STRICT_API|ALLOW_FRAMEWORKS)/,
+    );
+    const result = generateSynthPackageSwift(
+      baseSpec({
+        cxxApiDefines: [
+          'RN_STRICT_API',
+          'RN_ALLOW_FRAMEWORKS',
+          'RN_ALLOW_FRAMEWORKS',
+        ],
+      }),
+    );
+    expect(result).toMatch(
+      /cxxSettings: \[[^\]]*\.define\("NDEBUG", \.when\(configuration: \.release\)\), \.define\("RN_STRICT_API"\), \.define\("RN_ALLOW_FRAMEWORKS"\)[,\]]/,
+    );
+    expect(result.match(/\.define\("RN_ALLOW_FRAMEWORKS"\)/g)).toHaveLength(1);
+  });
+
   it('depends on ReactNative via a fixed relative path (default synth depth)', () => {
     const result = generateSynthPackageSwift(baseSpec({hasReactDep: true}));
     expect(result).toContain(
@@ -460,6 +482,120 @@ describe('generateSynthPackageSwift', () => {
       // publicHeadersPath intentionally not set
     });
     expect(result).not.toContain('publicHeadersPath:');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Platform floor — a manifest must not sit below the app's own iOS deployment
+// target: SwiftPM refuses a product whose minimum is higher than the depending
+// target's, so a self-managed dep at iOS 16.4 (Expo) would fail to link.
+// ---------------------------------------------------------------------------
+
+describe('iOS platform floor', () => {
+  it('defaults the aggregator to the React Native minimum, and raises it on request', () => {
+    expect(generateAutolinkedPackageSwift({})).toContain(
+      'platforms: [.iOS("15.1")]',
+    );
+    expect(
+      generateAutolinkedPackageSwift({iosDeploymentTarget: '16.4'}),
+    ).toContain('platforms: [.iOS("16.4")]');
+  });
+
+  it('defaults each synth package to the React Native minimum, and raises it on request', () => {
+    const spec = {swiftName: 'MyDep'};
+    expect(generateSynthPackageSwift(spec)).toContain(
+      'platforms: [.iOS("15.1")]',
+    );
+    expect(
+      generateSynthPackageSwift({...spec, iosDeploymentTarget: '16.4'}),
+    ).toContain('platforms: [.iOS("16.4")]');
+  });
+});
+
+describe('main() — --ios-deployment-target', () => {
+  let created = [];
+  let spies = [];
+
+  beforeEach(() => {
+    for (const m of ['log', 'warn', 'error']) {
+      spies.push(jest.spyOn(console, m).mockImplementation(() => {}));
+    }
+  });
+  afterEach(() => {
+    for (const s of spies) s.mockRestore();
+    spies = [];
+    for (const d of created) fs.rmSync(d, {recursive: true, force: true});
+    created = [];
+  });
+
+  // An app-local spm.module is the only route that produces BOTH the
+  // aggregator and a synth manifest without a community dep on disk.
+  function buildApp() {
+    const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-platform-'));
+    created.push(appRoot);
+    const rnRoot = path.join(appRoot, 'rn');
+    fs.mkdirSync(rnRoot, {recursive: true});
+    fs.writeFileSync(
+      path.join(appRoot, 'package.json'),
+      JSON.stringify({name: 'app'}),
+    );
+    const modDir = path.join(appRoot, 'ios', 'MyNativeModule');
+    fs.mkdirSync(modDir, {recursive: true});
+    fs.writeFileSync(path.join(modDir, 'Module.mm'), '// native source\n');
+    fs.writeFileSync(
+      path.join(appRoot, 'react-native.config.js'),
+      `module.exports = ${JSON.stringify({
+        spm: {modules: [{name: 'MyNativeModule', path: 'ios/MyNativeModule'}]},
+      })};\n`,
+    );
+    const autolinkDir = path.join(appRoot, 'build', 'generated', 'autolinking');
+    fs.mkdirSync(autolinkDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(autolinkDir, 'autolinking.json'),
+      JSON.stringify({dependencies: {}}),
+    );
+    return {appRoot, rnRoot, autolinkDir};
+  }
+
+  it("defines the app's C++ API macros (--cxx-api-define) in the synth manifest", () => {
+    const {appRoot, rnRoot, autolinkDir} = buildApp();
+    main([
+      '--app-root',
+      appRoot,
+      '--react-native-root',
+      rnRoot,
+      '--cxx-api-define',
+      'RN_STRICT_API',
+      '--cxx-api-define',
+      'RN_ALLOW_FRAMEWORKS',
+    ]);
+    const synth = fs.readFileSync(
+      path.join(autolinkDir, 'packages', 'MyNativeModule', 'Package.swift'),
+      'utf8',
+    );
+    expect(synth).toMatch(
+      /cxxSettings: \[[^\]]*\.define\("RN_STRICT_API"\), \.define\("RN_ALLOW_FRAMEWORKS"\)/,
+    );
+  });
+
+  it('sanitizes the flag into both the aggregator and the synth manifest', () => {
+    const {appRoot, rnRoot, autolinkDir} = buildApp();
+    main([
+      '--app-root',
+      appRoot,
+      '--react-native-root',
+      rnRoot,
+      '--ios-deployment-target',
+      '16',
+    ]);
+    for (const manifest of [
+      path.join(autolinkDir, 'Package.swift'),
+      path.join(autolinkDir, 'packages', 'MyNativeModule', 'Package.swift'),
+    ]) {
+      expect(fs.readFileSync(manifest, 'utf8')).toContain(
+        'platforms: [.iOS("16.0")]',
+      );
+    }
   });
 });
 
@@ -1049,6 +1185,28 @@ describe('hasMixedLanguageSources', () => {
   });
 });
 
+// Every main() case silences the [generate-spm-autolinking] logger and removes
+// the temp app dirs it appends to `created`.
+function useTempApps() {
+  const created = [];
+  const spies = [];
+
+  beforeEach(() => {
+    for (const m of ['log', 'warn', 'error']) {
+      spies.push(jest.spyOn(console, m).mockImplementation(() => {}));
+    }
+  });
+
+  afterEach(() => {
+    for (const s of spies) s.mockRestore();
+    spies.length = 0;
+    for (const d of created) fs.rmSync(d, {recursive: true, force: true});
+    created.length = 0;
+  });
+
+  return {created, spies};
+}
+
 // ---------------------------------------------------------------------------
 // main() — autolinking plugin host exemption
 //
@@ -1062,27 +1220,16 @@ describe('hasMixedLanguageSources', () => {
 // ---------------------------------------------------------------------------
 
 describe('main() — autolinking plugin host exemption', () => {
-  let created = [];
-  let spies = [];
-
-  beforeEach(() => {
-    // Silence the [generate-spm-autolinking] logger (console.log/warn/error).
-    for (const m of ['log', 'warn', 'error']) {
-      spies.push(jest.spyOn(console, m).mockImplementation(() => {}));
-    }
-  });
-
-  afterEach(() => {
-    for (const s of spies) s.mockRestore();
-    spies = [];
-    for (const d of created) fs.rmSync(d, {recursive: true, force: true});
-    created = [];
-  });
+  const {created} = useTempApps();
 
   // Builds a minimal app fixture whose ONLY autolinked iOS dep is `expo`, which
   // ships NO Package.swift. When `withPlugin` is set, expo declares an
   // autolinking plugin in its own react-native.config.js (transitive opt-in).
-  function buildFixture({withPlugin}) {
+  function buildFixture({
+    withPlugin,
+    depName = 'expo',
+    declareIn = 'package.json',
+  }) {
     const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-plugin-host-'));
     created.push(appRoot);
     // rnRoot only needs to exist (main() existence-checks it, then passes it
@@ -1095,17 +1242,27 @@ describe('main() — autolinking plugin host exemption', () => {
       JSON.stringify({name: 'app'}),
     );
     // The plugin-host dep: native sources present, but NO Package.swift.
-    const expoDir = path.join(appRoot, 'node_modules', 'expo');
+    const expoDir = path.join(appRoot, 'node_modules', ...depName.split('/'));
     fs.mkdirSync(path.join(expoDir, 'ios'), {recursive: true});
     fs.writeFileSync(
       path.join(expoDir, 'ios', 'Expo.mm'),
       '// native source\n',
     );
     if (withPlugin) {
-      fs.writeFileSync(
-        path.join(expoDir, 'react-native.config.js'),
-        "module.exports = { spm: { autolinkingPlugin: './spm-plugin.js' } };\n",
-      );
+      if (declareIn === 'react-native.config.js') {
+        fs.writeFileSync(
+          path.join(expoDir, 'react-native.config.js'),
+          "module.exports = { spm: { autolinkingPlugin: './spm-plugin.js' } };\n",
+        );
+      } else {
+        fs.writeFileSync(
+          path.join(expoDir, 'package.json'),
+          JSON.stringify({
+            name: depName,
+            swiftpmConfig: {autolinkingPlugin: './spm-plugin.js'},
+          }),
+        );
+      }
       fs.writeFileSync(
         path.join(expoDir, 'spm-plugin.js'),
         'module.exports = function () {\n' +
@@ -1121,7 +1278,9 @@ describe('main() — autolinking plugin host exemption', () => {
     fs.writeFileSync(
       path.join(autolinkDir, 'autolinking.json'),
       JSON.stringify({
-        dependencies: {expo: {root: expoDir, platforms: {ios: {}}}},
+        dependencies: {
+          [depName]: {root: expoDir, platforms: {ios: {}}},
+        },
       }),
     );
     return {appRoot, rnRoot};
@@ -1154,6 +1313,375 @@ describe('main() — autolinking plugin host exemption', () => {
       main(['--app-root', appRoot, '--react-native-root', rnRoot]),
     ).toThrow(MissingManifestError);
   });
+
+  // Adds a dep that declares the plugin host in its own `spm.dependencies`.
+  // `selfManaged` gives it a Package.swift of its own — which is what decides
+  // whether React Native emits its package references or the dep does.
+  function addDependentOfExpo(appRoot, name, {selfManaged = false} = {}) {
+    const depDir = path.join(appRoot, 'node_modules', name);
+    fs.mkdirSync(path.join(depDir, 'ios'), {recursive: true});
+    fs.writeFileSync(path.join(depDir, 'ios', 'Dep.mm'), '// native source\n');
+    if (selfManaged) {
+      fs.writeFileSync(
+        path.join(depDir, 'Package.swift'),
+        '// swift-tools-version: 6.0\n',
+      );
+    }
+    fs.writeFileSync(
+      path.join(depDir, 'react-native.config.js'),
+      'module.exports = {dependency: {platforms: {ios: {}}}, ' +
+        "spm: {dependencies: ['expo']}};\n",
+    );
+    const jsonPath = path.join(
+      appRoot,
+      'build/generated/autolinking/autolinking.json',
+    );
+    const json = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+    json.dependencies[name] = {root: depDir, platforms: {ios: {}}};
+    fs.writeFileSync(jsonPath, JSON.stringify(json));
+  }
+
+  it('fails when a dep whose manifest RN generates declares the plugin host in its spm.dependencies', () => {
+    const {appRoot, rnRoot} = buildFixture({withPlugin: true});
+    addDependentOfExpo(appRoot, 'react-native-y');
+    const run = () =>
+      main(['--app-root', appRoot, '--react-native-root', rnRoot]);
+    // Both packages, so the reader knows which config to edit and why.
+    expect(run).toThrow(/'react-native-y'/);
+    expect(run).toThrow(/'expo'/);
+    expect(run).toThrow(/autolinking plugin/);
+    expect(run).toThrow(/declared as a SwiftPM dependency/);
+  });
+
+  it('leaves a self-managed dependent alone — its own Package.swift declares its package references, so RN emits none', () => {
+    const {appRoot, rnRoot} = buildFixture({withPlugin: true});
+    addDependentOfExpo(appRoot, 'react-native-y', {selfManaged: true});
+    expect(() =>
+      main(['--app-root', appRoot, '--react-native-root', rnRoot]),
+    ).not.toThrow();
+  });
+
+  it('leaves the same pair alone when the host ships no plugin — a plain spm.dependency is not a plugin host', () => {
+    const {appRoot, rnRoot} = buildFixture({withPlugin: false});
+    addDependentOfExpo(appRoot, 'react-native-y');
+    // Both deps ship no manifest, so the missing-manifest error is the expected
+    // one — the plugin-host diagnosis must not fire for a plain dependency.
+    expect(() =>
+      main(['--app-root', appRoot, '--react-native-root', rnRoot]),
+    ).toThrow(MissingManifestError);
+  });
+  // `spm scaffold` has no plugin knowledge, so exempting the autolinker alone
+  // left the two commands disagreeing about the same dep.
+  it.each([[true], [false]])(
+    'rejects a dep deriving a reserved name whether or not it ships a plugin (withPlugin=%s)',
+    withPlugin => {
+      // 'react-headers' derives the reserved 'ReactHeaders', with no scope.
+      const {appRoot, rnRoot} = buildFixture({
+        withPlugin,
+        depName: 'react-headers',
+      });
+      expect(() =>
+        main(['--app-root', appRoot, '--react-native-root', rnRoot]),
+      ).toThrow(SpmNameCollisionError);
+      expect(() =>
+        main(['--app-root', appRoot, '--react-native-root', rnRoot]),
+      ).toThrow(/'react-headers'.*React Native reserves/s);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// main() — spm.modules name validation
+//
+// App-local module names land in the manifest exactly as written, so they need
+// the checks an autolinked dep's Swift name gets: a valid identifier, not one
+// of React Native's reserved names, and unique across modules and deps.
+// ---------------------------------------------------------------------------
+
+describe('main() — swiftpmConfig.modules names', () => {
+  const {created, spies} = useTempApps();
+
+  // App fixture whose react-native.config.js declares `spm.modules`, plus an
+  // optional autolinked dep (for the module-vs-dep collision case).
+  function buildApp({modules, dep}) {
+    const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-modules-'));
+    created.push(appRoot);
+    const rnRoot = path.join(appRoot, 'rn');
+    fs.mkdirSync(rnRoot, {recursive: true});
+    fs.writeFileSync(
+      path.join(appRoot, 'package.json'),
+      JSON.stringify({name: 'app', swiftpmConfig: {modules}}),
+    );
+    for (const mod of modules) {
+      const modDir = path.join(appRoot, mod.path);
+      fs.mkdirSync(modDir, {recursive: true});
+      fs.writeFileSync(path.join(modDir, 'Module.mm'), '// native source\n');
+    }
+    const dependencies = {};
+    if (dep != null) {
+      const depDir = path.join(appRoot, 'node_modules', dep.name);
+      fs.mkdirSync(path.join(depDir, 'ios'), {recursive: true});
+      fs.writeFileSync(
+        path.join(depDir, 'ios', 'Dep.mm'),
+        '// native source\n',
+      );
+      fs.writeFileSync(
+        path.join(depDir, 'Package.swift'),
+        '// swift-tools-version: 6.0\n',
+      );
+      const ios = {};
+      if (dep.podName != null) {
+        ios.podspecPath = path.join(depDir, `${dep.podName}.podspec`);
+        fs.writeFileSync(
+          ios.podspecPath,
+          `Pod::Spec.new do |s|\n  s.name = "${dep.podName}"\n  s.version = "1.0.0"\nend\n`,
+        );
+      }
+      dependencies[dep.name] = {root: depDir, platforms: {ios}};
+    }
+    const autolinkDir = path.join(appRoot, 'build', 'generated', 'autolinking');
+    fs.mkdirSync(autolinkDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(autolinkDir, 'autolinking.json'),
+      JSON.stringify({dependencies}),
+    );
+    return {appRoot, rnRoot};
+  }
+
+  const run = ({appRoot, rnRoot}) =>
+    main(['--app-root', appRoot, '--react-native-root', rnRoot]);
+
+  it('emits a module the app declares', () => {
+    const app = buildApp({
+      modules: [{name: 'MyNativeModule', path: 'ios/MyNativeModule'}],
+    });
+    run(app);
+    expect(
+      fs.readFileSync(
+        path.join(app.appRoot, 'build/generated/autolinking/Package.swift'),
+        'utf8',
+      ),
+    ).toContain('"MyNativeModule"');
+  });
+
+  it('rejects a module named after a reserved React Native name', () => {
+    const app = buildApp({
+      modules: [{name: 'ReactNative', path: 'ios/MyNativeModule'}],
+    });
+    expect(() => run(app)).toThrow(SpmNameCollisionError);
+    expect(() => run(app)).toThrow(
+      /the 'swiftpmConfig.modules' entry 'ReactNative' resolves to 'ReactNative', which React Native reserves/,
+    );
+    expect(() => run(app)).toThrow(/'swiftpmConfig\.modules'\.$/);
+  });
+
+  it('rejects a reserved product name in any casing', () => {
+    const app = buildApp({
+      modules: [{name: 'reactheaders', path: 'ios/MyNativeModule'}],
+    });
+    expect(() => run(app)).toThrow(SpmNameCollisionError);
+    expect(() => run(app)).toThrow(
+      /the 'swiftpmConfig\.modules' entry 'reactheaders' resolves to 'reactheaders', which differs from React Native's reserved 'ReactHeaders' only in case/,
+    );
+  });
+
+  it('rejects a module name that is not a valid Swift identifier', () => {
+    const app = buildApp({
+      modules: [{name: 'My Module', path: 'ios/MyNativeModule'}],
+    });
+    expect(() => run(app)).toThrow(
+      /invalid 'swiftpmConfig.modules' name "My Module"/,
+    );
+  });
+
+  it('rejects two modules resolving to the same name', () => {
+    const app = buildApp({
+      modules: [
+        {name: 'Shared', path: 'ios/one'},
+        {name: 'shared', path: 'ios/two'},
+      ],
+    });
+    expect(() => run(app)).toThrow(SpmNameCollisionError);
+    expect(() => run(app)).toThrow(
+      /the 'swiftpmConfig.modules' entry 'shared' differs from the existing target 'Shared' only in case/,
+    );
+  });
+
+  it('rejects two modules whose names differ only in punctuation', () => {
+    const app = buildApp({
+      modules: [
+        {name: 'foo-bar', path: 'ios/one'},
+        {name: 'foo_bar', path: 'ios/two'},
+      ],
+    });
+    expect(() => run(app)).toThrow(SpmNameCollisionError);
+    expect(() => run(app)).toThrow(
+      /the 'swiftpmConfig.modules' entry 'foo_bar' compiles as the same module as the existing target 'foo-bar'/,
+    );
+  });
+
+  it('rejects a module colliding with an autolinked dep through SwiftPM normalization', () => {
+    const app = buildApp({
+      modules: [{name: 'foo_bar', path: 'ios/MyNativeModule'}],
+      dep: {name: 'react-native-foo-bar', podName: 'foo-bar'},
+    });
+    expect(() => run(app)).toThrow(SpmNameCollisionError);
+    expect(() => run(app)).toThrow(
+      /the 'swiftpmConfig.modules' entry 'foo_bar' compiles as the same module as the existing target 'foo-bar'/,
+    );
+  });
+
+  it('rejects a module colliding with an autolinked dep', () => {
+    const app = buildApp({
+      modules: [{name: 'ReactNativeFoo', path: 'ios/MyNativeModule'}],
+      dep: {name: 'react-native-foo'},
+    });
+    expect(() => run(app)).toThrow(SpmNameCollisionError);
+    expect(() => run(app)).toThrow(
+      /the 'swiftpmConfig.modules' entry 'ReactNativeFoo' is already the name of another autolinked target/,
+    );
+  });
+
+  // `appRoot` is the Xcode project dir (`ios/`) in a standard app, so the
+  // app's settings live one level up, with its package.json — the directory
+  // codegen already calls the project root.
+  describe('found at the project root or the Xcode dir', () => {
+    // A standard app: JS root with package.json, Xcode project in ios/.
+    function buildStandardApp({atProjectRoot, atAppRoot}) {
+      const projectRoot = fs.realpathSync(
+        fs.mkdtempSync(path.join(os.tmpdir(), 'spm-config-root-')),
+      );
+      created.push(projectRoot);
+      const appRoot = path.join(projectRoot, 'ios');
+      const rnRoot = path.join(projectRoot, 'rn');
+      fs.mkdirSync(rnRoot, {recursive: true});
+      fs.mkdirSync(appRoot, {recursive: true});
+      fs.writeFileSync(
+        path.join(projectRoot, 'package.json'),
+        JSON.stringify({
+          name: 'app',
+          swiftpmConfig: atProjectRoot ?? undefined,
+        }),
+      );
+      // The Xcode-dir layout that predates `swiftpmConfig`: a config file next to
+      // the project. It has no package.json, so the project root is still above.
+      if (atAppRoot != null) {
+        fs.writeFileSync(
+          path.join(appRoot, 'react-native.config.js'),
+          `module.exports = ${JSON.stringify({spm: atAppRoot})};\n`,
+        );
+      }
+      const stageModules = (root, modules) => {
+        for (const mod of modules ?? []) {
+          const modDir = path.resolve(root, mod.path);
+          fs.mkdirSync(modDir, {recursive: true});
+          fs.writeFileSync(
+            path.join(modDir, 'Module.mm'),
+            '// native source\n',
+          );
+        }
+      };
+      stageModules(projectRoot, atProjectRoot?.modules);
+      stageModules(appRoot, atAppRoot?.modules);
+      const autolinkDir = path.join(
+        appRoot,
+        'build',
+        'generated',
+        'autolinking',
+      );
+      fs.mkdirSync(autolinkDir, {recursive: true});
+      fs.writeFileSync(
+        path.join(autolinkDir, 'autolinking.json'),
+        JSON.stringify({dependencies: {}}),
+      );
+      return {appRoot, rnRoot, autolinkDir};
+    }
+
+    const manifestOf = ({autolinkDir}) =>
+      fs.readFileSync(path.join(autolinkDir, 'Package.swift'), 'utf8');
+
+    it('finds modules declared at the project root, above the Xcode dir', () => {
+      const app = buildStandardApp({
+        atProjectRoot: {modules: [{name: 'FromProjectRoot', path: 'MyModule'}]},
+      });
+      main(['--app-root', app.appRoot, '--react-native-root', app.rnRoot]);
+      expect(manifestOf(app)).toContain('"FromProjectRoot"');
+    });
+
+    it('still finds a config that sits in the Xcode dir, as it did before', () => {
+      const app = buildStandardApp({
+        atAppRoot: {modules: [{name: 'FromAppRoot', path: 'MyModule'}]},
+      });
+      main(['--app-root', app.appRoot, '--react-native-root', app.rnRoot]);
+      expect(manifestOf(app)).toContain('"FromAppRoot"');
+    });
+
+    it('prefers the project root when both declare settings', () => {
+      const app = buildStandardApp({
+        atProjectRoot: {modules: [{name: 'FromProjectRoot', path: 'MyModule'}]},
+        atAppRoot: {modules: [{name: 'FromAppRoot', path: 'Other'}]},
+      });
+      main(['--app-root', app.appRoot, '--react-native-root', app.rnRoot]);
+      const manifest = manifestOf(app);
+      expect(manifest).toContain('"FromProjectRoot"');
+      expect(manifest).not.toContain('"FromAppRoot"');
+    });
+
+    it('keeps a Xcode-dir field the project root does not declare', () => {
+      // The drop this guards: one unrelated key at the project root used to hide
+      // a working `modules` set in the Xcode dir.
+      const app = buildStandardApp({
+        atProjectRoot: {denyPlugins: ['some-framework']},
+        atAppRoot: {modules: [{name: 'FromAppRoot', path: 'MyModule'}]},
+      });
+      main(['--app-root', app.appRoot, '--react-native-root', app.rnRoot]);
+      expect(manifestOf(app)).toContain('"FromAppRoot"');
+    });
+
+    it('says which field it took from the Xcode dir', () => {
+      const app = buildStandardApp({
+        atProjectRoot: {denyPlugins: []},
+        atAppRoot: {modules: [{name: 'FromAppRoot', path: 'MyModule'}]},
+      });
+      main(['--app-root', app.appRoot, '--react-native-root', app.rnRoot]);
+      const warned = spies
+        .flatMap(spy => spy.mock.calls)
+        .map(call => call.join(' '))
+        .join('\n');
+      expect(warned).toContain('modules');
+      expect(warned).toContain(app.appRoot);
+    });
+
+    it('resolves a module path against the root that declared it', () => {
+      // A path written next to the JS-root package.json reads from there; one in
+      // the Xcode dir keeps reading from there.
+      const app = buildStandardApp({
+        atProjectRoot: {modules: [{name: 'FromProjectRoot', path: 'ios/Deep'}]},
+      });
+      main(['--app-root', app.appRoot, '--react-native-root', app.rnRoot]);
+      // The source only mirrors if the declared path was found on disk.
+      expect(
+        fs.existsSync(
+          path.join(app.autolinkDir, 'packages/FromProjectRoot/root/Module.mm'),
+        ),
+      ).toBe(true);
+    });
+
+    it('reads denyPlugins from the project root too', () => {
+      const app = buildStandardApp({
+        atProjectRoot: {denyPlugins: ['some-framework']},
+      });
+      expect(() =>
+        main(['--app-root', app.appRoot, '--react-native-root', app.rnRoot]),
+      ).not.toThrow();
+      expect(readDenyPluginsFromConfig(path.dirname(app.appRoot))).toEqual([
+        'some-framework',
+      ]);
+      expect(readDenyPluginsFromConfig(app.appRoot)).toEqual([
+        'some-framework',
+      ]);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1166,20 +1694,7 @@ describe('main() — autolinking plugin host exemption', () => {
 // ---------------------------------------------------------------------------
 
 describe('main() — flavoredFrameworks sidecar', () => {
-  let created = [];
-  let spies = [];
-
-  beforeEach(() => {
-    for (const m of ['log', 'warn', 'error']) {
-      spies.push(jest.spyOn(console, m).mockImplementation(() => {}));
-    }
-  });
-  afterEach(() => {
-    for (const s of spies) s.mockRestore();
-    spies = [];
-    for (const d of created) fs.rmSync(d, {recursive: true, force: true});
-    created = [];
-  });
+  const {created} = useTempApps();
 
   const sidecarPath = appRoot =>
     path.join(
@@ -1292,30 +1807,123 @@ describe('main() — flavoredFrameworks sidecar', () => {
 });
 
 // ---------------------------------------------------------------------------
+// main() — plugin scriptPhases sidecar
+//
+// `.spm-plugin-script-phases.json` records the phases a plugin wants injected
+// into the app target (SwiftPM has no `script_phase`). Like the other sidecars
+// it is ALWAYS rewritten — `[]` when no plugin declares any — so removing a
+// plugin clears stale entries.
+// ---------------------------------------------------------------------------
+
+describe('main() — scriptPhases sidecar', () => {
+  const {created} = useTempApps();
+
+  const sidecarPath = appRoot =>
+    path.join(
+      appRoot,
+      'build',
+      'generated',
+      'autolinking',
+      '.spm-plugin-script-phases.json',
+    );
+
+  // An app whose only autolinked dep is `expo`; when `pluginReturn` is given,
+  // expo declares a plugin returning that literal.
+  function scaffold(pluginReturn) {
+    const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-scriptphase-'));
+    created.push(appRoot);
+    const rnRoot = path.join(appRoot, 'rn');
+    fs.mkdirSync(rnRoot, {recursive: true});
+    fs.writeFileSync(
+      path.join(appRoot, 'package.json'),
+      JSON.stringify({name: 'app'}),
+    );
+    const autolinkDir = path.join(appRoot, 'build', 'generated', 'autolinking');
+    fs.mkdirSync(autolinkDir, {recursive: true});
+    const expoDir = path.join(appRoot, 'node_modules', 'expo');
+    if (pluginReturn != null) {
+      fs.mkdirSync(path.join(expoDir, 'ios'), {recursive: true});
+      fs.writeFileSync(path.join(expoDir, 'ios', 'Expo.mm'), '// native\n');
+      fs.writeFileSync(
+        path.join(expoDir, 'react-native.config.js'),
+        "module.exports = { spm: { autolinkingPlugin: './spm-plugin.js' } };\n",
+      );
+      fs.writeFileSync(
+        path.join(expoDir, 'spm-plugin.js'),
+        `module.exports = function () { return ${pluginReturn}; };\n`,
+      );
+    }
+    fs.writeFileSync(
+      path.join(autolinkDir, 'autolinking.json'),
+      JSON.stringify({
+        dependencies:
+          pluginReturn != null
+            ? {expo: {root: expoDir, platforms: {ios: {}}}}
+            : {},
+      }),
+    );
+    return {appRoot, rnRoot};
+  }
+
+  it('records plugin-declared script phases, normalized', () => {
+    const {appRoot, rnRoot} = scaffold(`{
+      scriptPhases: [{
+        id: 'expo-constants.generate-app-config',
+        name: 'Generate Expo App Config',
+        script: 'node ./write-app-config.js',
+        position: 'beforeCompile',
+        outputPaths: ['$(DERIVED_FILE_DIR)/app.config'],
+      }, {
+        id: 'expo-constants.stamp',
+        name: 'Stamp',
+        script: 'echo stamped',
+      }],
+    }`);
+
+    main(['--app-root', appRoot, '--react-native-root', rnRoot]);
+
+    expect(JSON.parse(fs.readFileSync(sidecarPath(appRoot), 'utf8'))).toEqual([
+      {
+        id: 'expo-constants.generate-app-config',
+        name: 'Generate Expo App Config',
+        script: 'node ./write-app-config.js',
+        position: 'beforeCompile',
+        outputPaths: ['$(DERIVED_FILE_DIR)/app.config'],
+      },
+      {
+        id: 'expo-constants.stamp',
+        name: 'Stamp',
+        script: 'echo stamped',
+        position: 'end',
+      },
+    ]);
+  });
+
+  it('writes [] when no plugin declares any (clears stale entries)', () => {
+    const {appRoot, rnRoot} = scaffold(null);
+    fs.writeFileSync(
+      sidecarPath(appRoot),
+      JSON.stringify([{id: 'stale', name: 'Stale', script: 'echo'}]),
+    );
+    main(['--app-root', appRoot, '--react-native-root', rnRoot]);
+    expect(JSON.parse(fs.readFileSync(sidecarPath(appRoot), 'utf8'))).toEqual(
+      [],
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // main() — .spm-sync-watch-paths emission (mixed dirs + files)
 //
 // The watch file drives the Xcode auto-sync stale check. It must carry, mixed
 // and deduped/sorted: (1) each module's source DIR; (2) each npm dep's
 // checked-in root Package.swift (FILE) and .react-native/ (DIR) — threaded from
 // the autolinking model's dep root, not derived by walking up; (3) plugin
-// watchPaths. Nonexistent paths are filtered at emission time.
+// watchPaths. Nonexistent paths go to .spm-sync-watch-absent instead.
 // ---------------------------------------------------------------------------
 
 describe('main() — .spm-sync-watch-paths emission', () => {
-  let created = [];
-  let spies = [];
-
-  beforeEach(() => {
-    for (const m of ['log', 'warn', 'error']) {
-      spies.push(jest.spyOn(console, m).mockImplementation(() => {}));
-    }
-  });
-  afterEach(() => {
-    for (const s of spies) s.mockRestore();
-    spies = [];
-    for (const d of created) fs.rmSync(d, {recursive: true, force: true});
-    created = [];
-  });
+  const {created} = useTempApps();
 
   function readWatchLines(appRoot) {
     const contents = fs.readFileSync(
@@ -1352,8 +1960,8 @@ describe('main() — .spm-sync-watch-paths emission', () => {
     fs.writeFileSync(path.join(fooDir, 'Foo.swift'), '// src\n');
 
     // (C) A plugin-host dep contributing watchPaths: one existing absolute path
-    // (kept), one absent absolute path (filtered at emission), one relative
-    // path (dropped by invokePlugins).
+    // (kept), one absent absolute path (listed as absent), one relative path
+    // (dropped by invokePlugins).
     const expoDir = path.join(appRoot, 'node_modules', 'expo');
     fs.mkdirSync(path.join(expoDir, 'ios'), {recursive: true});
     fs.writeFileSync(path.join(expoDir, 'ios', 'Expo.mm'), '// native\n');
@@ -1372,12 +1980,20 @@ describe('main() — .spm-sync-watch-paths emission', () => {
         "    productDependencies: [{name: 'ExpoModulesCore', package: 'ExpoModulesCore'}],",
         '    watchPaths: [',
         "      path.join(__dirname, 'Package.swift'),", // exists → kept
-        "      path.join(__dirname, 'MISSING.swift'),", // absent → filtered at emission
+        "      path.join(__dirname, 'MISSING.swift'),", // absent → listed as absent
         "      'rel/manifest',", // relative → dropped by invokePlugins
         '    ],',
         '  };',
         '};',
       ].join('\n') + '\n',
+    );
+
+    // (D) The app's project file: Xcode rewrites it on every IDE edit, so
+    // watching it would re-sync after each one.
+    fs.mkdirSync(path.join(appRoot, 'App.xcodeproj'));
+    fs.writeFileSync(
+      path.join(appRoot, 'App.xcodeproj', 'project.pbxproj'),
+      '\n',
     );
 
     const autolinkDir = path.join(appRoot, 'build', 'generated', 'autolinking');
@@ -1404,6 +2020,9 @@ describe('main() — .spm-sync-watch-paths emission', () => {
     // (C) plugin's existing absolute watchPath is kept.
     expect(lines).toContain(path.join(expoDir, 'Package.swift'));
 
+    // (D) the app's project file is not watched.
+    expect(lines.some(l => l.includes('project.pbxproj'))).toBe(false);
+
     // Filtered / dropped entries never reach the file.
     expect(lines.some(l => l.includes('MISSING.swift'))).toBe(false);
     expect(lines.some(l => l.includes('rel/manifest'))).toBe(false);
@@ -1411,5 +2030,403 @@ describe('main() — .spm-sync-watch-paths emission', () => {
     // Deduped and sorted (stable, deterministic output).
     expect(new Set(lines).size).toBe(lines.length);
     expect([...lines].sort()).toEqual(lines);
+
+    expect(
+      fs.readFileSync(path.join(autolinkDir, '.spm-sync-watch-absent'), 'utf8'),
+    ).toBe(path.join(expoDir, 'MISSING.swift') + '\n');
+  });
+
+  it('lists a dep root without Package.swift or .react-native/ as absent', () => {
+    const appRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'spm-watch-absent-')),
+    );
+    created.push(appRoot);
+    const rnRoot = path.join(appRoot, 'rn');
+    fs.mkdirSync(rnRoot, {recursive: true});
+    fs.writeFileSync(
+      path.join(appRoot, 'package.json'),
+      JSON.stringify({name: 'app'}),
+    );
+
+    // Self-managed through ios/Package.swift, so nothing exists at the root.
+    const barDir = path.join(appRoot, 'node_modules', 'react-native-bar');
+    fs.mkdirSync(path.join(barDir, 'ios'), {recursive: true});
+    fs.writeFileSync(
+      path.join(barDir, 'ios', 'Package.swift'),
+      '// swift-tools-version:5.9\n// hand-authored\n',
+    );
+    fs.writeFileSync(path.join(barDir, 'ios', 'Bar.swift'), '// src\n');
+
+    const autolinkDir = path.join(appRoot, 'build', 'generated', 'autolinking');
+    fs.mkdirSync(autolinkDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(autolinkDir, 'autolinking.json'),
+      JSON.stringify({
+        dependencies: {
+          'react-native-bar': {root: barDir, platforms: {ios: {}}},
+        },
+      }),
+    );
+
+    main(['--app-root', appRoot, '--react-native-root', rnRoot]);
+
+    expect(
+      fs.readFileSync(path.join(autolinkDir, '.spm-sync-watch-absent'), 'utf8'),
+    ).toBe(
+      [
+        path.join(barDir, '.react-native'),
+        path.join(barDir, 'Package.swift'),
+      ].join('\n') + '\n',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// main() — libs/ symlinks for self-managed deps
+//
+// Xcode loads each libs/<SwiftName> symlink as a local package root. Replacing
+// one that did not change invalidates the package graph Xcode already holds,
+// and the build then fails with "Missing package product". So a sync that
+// changes nothing must leave every inode under libs/ — and libs/ itself —
+// untouched, while a dep that is gone must lose its symlink.
+// ---------------------------------------------------------------------------
+
+describe('main() — libs/ symlinks for self-managed deps', () => {
+  const {created} = useTempApps();
+
+  function buildApp(depNames) {
+    const appRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'spm-libs-sync-')),
+    );
+    created.push(appRoot);
+    const rnRoot = path.join(appRoot, 'rn');
+    fs.mkdirSync(rnRoot, {recursive: true});
+    fs.writeFileSync(
+      path.join(appRoot, 'package.json'),
+      JSON.stringify({name: 'app'}),
+    );
+
+    const dependencies = {};
+    for (const npmName of depNames) {
+      // A hand-authored root Package.swift (no AUTOGEN marker) is what makes a
+      // dep self-managed.
+      const depDir = path.join(appRoot, 'node_modules', npmName);
+      fs.mkdirSync(depDir, {recursive: true});
+      fs.writeFileSync(
+        path.join(depDir, 'Package.swift'),
+        '// swift-tools-version:5.9\n// hand-authored\n',
+      );
+      fs.writeFileSync(path.join(depDir, 'Source.swift'), '// src\n');
+      dependencies[npmName] = {root: depDir, platforms: {ios: {}}};
+    }
+
+    const autolinkDir = path.join(appRoot, 'build', 'generated', 'autolinking');
+    fs.mkdirSync(autolinkDir, {recursive: true});
+    const writeAutolinkingJson = names =>
+      fs.writeFileSync(
+        path.join(autolinkDir, 'autolinking.json'),
+        JSON.stringify({
+          dependencies: Object.fromEntries(
+            names.map(n => [n, dependencies[n]]),
+          ),
+        }),
+      );
+    writeAutolinkingJson(depNames);
+
+    return {
+      libsDir: path.join(autolinkDir, 'libs'),
+      writeAutolinkingJson,
+      sync: () => main(['--app-root', appRoot, '--react-native-root', rnRoot]),
+    };
+  }
+
+  const inodesOf = libsDir =>
+    Object.fromEntries(
+      ['.', ...fs.readdirSync(libsDir)].map(entry => [
+        entry,
+        fs.lstatSync(path.join(libsDir, entry)).ino,
+      ]),
+    );
+
+  it('keeps every inode when nothing changed', () => {
+    const app = buildApp(['react-native-foo', 'react-native-bar']);
+
+    app.sync();
+    const before = inodesOf(app.libsDir);
+    expect(Object.keys(before).sort()).toEqual([
+      '.',
+      'ReactNativeBar',
+      'ReactNativeFoo',
+    ]);
+
+    app.sync();
+    expect(inodesOf(app.libsDir)).toEqual(before);
+  });
+
+  it('drops the symlink of a dep that is no longer autolinked', () => {
+    const app = buildApp(['react-native-foo', 'react-native-bar']);
+
+    app.sync();
+    expect(fs.readdirSync(app.libsDir).sort()).toEqual([
+      'ReactNativeBar',
+      'ReactNativeFoo',
+    ]);
+
+    app.writeAutolinkingJson(['react-native-foo']);
+    app.sync();
+    expect(fs.readdirSync(app.libsDir)).toEqual(['ReactNativeFoo']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// main() — the name a dep's podspec declares reaching a real manifest.
+// ---------------------------------------------------------------------------
+
+describe('main() — podspec-derived names', () => {
+  const {created} = useTempApps();
+
+  // Each dep ships a Package.swift, so it reaches the aggregator as
+  // self-managed, plus the podspec its name is meant to come from.
+  function buildFixture(...deps) {
+    const appRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'spm-podspec-name-')),
+    );
+    created.push(appRoot);
+    const rnRoot = path.join(appRoot, 'rn');
+    fs.mkdirSync(rnRoot, {recursive: true});
+    fs.writeFileSync(
+      path.join(appRoot, 'package.json'),
+      JSON.stringify({name: 'app'}),
+    );
+    const dependencies = {};
+    for (const {npmName, podName, headerDir, swiftpmConfig} of deps) {
+      const depDir = path.join(appRoot, 'node_modules', ...npmName.split('/'));
+      fs.mkdirSync(path.join(depDir, 'ios'), {recursive: true});
+      if (swiftpmConfig != null) {
+        fs.writeFileSync(
+          path.join(depDir, 'package.json'),
+          JSON.stringify({name: npmName, swiftpmConfig}),
+        );
+      }
+      fs.writeFileSync(
+        path.join(depDir, 'Package.swift'),
+        '// swift-tools-version:6.0\n// hand-authored\n',
+      );
+      fs.writeFileSync(path.join(depDir, 'ios', 'Lib.h'), '// header\n');
+      fs.writeFileSync(path.join(depDir, 'ios', 'Lib.mm'), '// src\n');
+      const ios = {};
+      if (podName != null) {
+        const podspecPath = path.join(depDir, `${podName}.podspec`);
+        fs.writeFileSync(
+          podspecPath,
+          [
+            'Pod::Spec.new do |s|',
+            `  s.name = "${podName}"`,
+            '  s.version = "1.0.0"',
+            ...(headerDir != null ? [`  s.header_dir = "${headerDir}"`] : []),
+            '  s.source_files = "ios/**/*.{h,m,mm}"',
+            'end',
+            '',
+          ].join('\n'),
+        );
+        ios.podspecPath = podspecPath;
+      }
+      dependencies[npmName] = {root: depDir, platforms: {ios}};
+    }
+    const autolinkDir = path.join(appRoot, 'build', 'generated', 'autolinking');
+    fs.mkdirSync(autolinkDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(autolinkDir, 'autolinking.json'),
+      JSON.stringify({dependencies}),
+    );
+    return {appRoot, rnRoot};
+  }
+
+  function run(appRoot, rnRoot) {
+    main(['--app-root', appRoot, '--react-native-root', rnRoot]);
+    const outDir = path.join(appRoot, 'build/generated/autolinking');
+    return {
+      outDir,
+      manifest: fs.readFileSync(path.join(outDir, 'Package.swift'), 'utf8'),
+    };
+  }
+
+  it('emits every step of the precedence as the package ref, the product ref and the header slice', () => {
+    const {appRoot, rnRoot} = buildFixture(
+      {npmName: 'react-native-svg', podName: 'RNSVG'},
+      {
+        npmName: 'react-native-reanimated',
+        podName: 'RNReanimated',
+        headerDir: 'reanimated',
+      },
+      {
+        npmName: 'react-native-svg-fork',
+        podName: 'RNSVGFork',
+        swiftpmConfig: {name: 'MySvg'},
+      },
+      {npmName: 'react-native-screens'},
+    );
+    const {outDir, manifest} = run(appRoot, rnRoot);
+
+    // swiftpmConfig.name, header_dir, the podspec name, the npm name.
+    for (const name of ['MySvg', 'reanimated', 'RNSVG', 'ReactNativeScreens']) {
+      expect(manifest).toContain(
+        `.package(name: "${name}", path: "libs/${name}")`,
+      );
+      expect(manifest).toContain(
+        `.product(name: "${name}", package: "${name}")`,
+      );
+      // So `#import <Name/Lib.h>` resolves for consumers.
+      expect(
+        fs.existsSync(path.join(outDir, `headers/${name}/ios/Lib.h`)),
+      ).toBe(true);
+      expect(fs.existsSync(path.join(outDir, `libs/${name}`))).toBe(true);
+    }
+
+    // Nothing is referenced under a name an earlier step outranked.
+    for (const outranked of [
+      'RNSVGFork',
+      'RNReanimated',
+      'ReactNativeSvg',
+      'ReactNativeReanimated',
+    ]) {
+      expect(manifest).not.toContain(outranked);
+      expect(fs.existsSync(path.join(outDir, `headers/${outranked}`))).toBe(
+        false,
+      );
+    }
+  });
+
+  it('refuses an unscoped dep deriving a reserved name', () => {
+    const {appRoot, rnRoot} = buildFixture({npmName: 'react-headers'});
+    expect(() => run(appRoot, rnRoot)).toThrow(SpmNameCollisionError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// autolinkingDepToSpmTarget — resolved names only, never re-derived ones.
+// ---------------------------------------------------------------------------
+
+describe('autolinkingDepToSpmTarget', () => {
+  const dep = (extra = {}) => ({
+    name: '@powersync/react-native',
+    root: '/dep',
+    platforms: {ios: {sourceDir: '/dep/ios'}},
+    ...extra,
+  });
+
+  it('carries a resolved sibling name into the emitted sibling refs', () => {
+    const target = autolinkingDepToSpmTarget(
+      'react-native-consumer',
+      {
+        name: 'react-native-consumer',
+        root: '/consumer',
+        platforms: {ios: {sourceDir: '/consumer/ios'}},
+        swiftName: 'ReactNativeConsumer',
+        spmDependencies: ['@powersync/react-native'],
+      },
+      '/out',
+      new Map([['@powersync/react-native', 'PowersyncReactNative']]),
+    );
+    const manifest = generateSynthPackageSwift({
+      swiftName: target.name,
+      spmDependencies: (target.spmTargetDependencies ?? []).map(swiftName => ({
+        swiftName,
+      })),
+      hasReactDep: false,
+      targetPath: '.',
+    });
+    expect(manifest).toContain(
+      '.package(name: "PowersyncReactNative", path: "../PowersyncReactNative")',
+    );
+    expect(manifest).toContain(
+      '.product(name: "PowersyncReactNative", package: "PowersyncReactNative")',
+    );
+    expect(manifest).not.toContain('ReactNative", package: "ReactNative"');
+  });
+
+  it('fails loudly instead of re-deriving a dep with no resolved name', () => {
+    expect(() =>
+      autolinkingDepToSpmTarget(
+        '@powersync/react-native',
+        dep(),
+        '/out',
+        new Map(),
+      ),
+    ).toThrow(/expandSpmDependencies/);
+  });
+
+  it('fails loudly instead of re-deriving an unmapped spm.dependency', () => {
+    expect(() =>
+      autolinkingDepToSpmTarget(
+        'react-native-consumer',
+        {
+          name: 'react-native-consumer',
+          root: '/consumer',
+          platforms: {ios: {sourceDir: '/consumer/ios'}},
+          swiftName: 'ReactNativeConsumer',
+          spmDependencies: ['@powersync/react-native'],
+        },
+        '/out',
+        new Map(),
+      ),
+    ).toThrow(/@powersync\/react-native/);
+    expect(() =>
+      autolinkingDepToSpmTarget(
+        'react-native-consumer',
+        {
+          name: 'react-native-consumer',
+          root: '/consumer',
+          platforms: {ios: {sourceDir: '/consumer/ios'}},
+          swiftName: 'ReactNativeConsumer',
+          spmDependencies: ['@powersync/react-native'],
+        },
+        '/out',
+        new Map(),
+      ),
+    ).toThrow(/expandSpmDependencies/);
+  });
+
+  // Every npm dep is self-managed or reported missing, so nothing would
+  // consume header search paths read from its podspec — and the read can
+  // spawn `pod ipc spec`.
+  it('does not read the podspec of a dep that declares HEADER_SEARCH_PATHS', () => {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-hsp-'));
+    try {
+      fs.writeFileSync(
+        path.join(sourceDir, 'Consumer.podspec'),
+        "Pod::Spec.new do |s|\n  s.name = 'Consumer'\n" +
+          "  s.pod_target_xcconfig = { 'HEADER_SEARCH_PATHS' => '\"$(PODS_TARGET_SRCROOT)/common/cpp\"' }\nend\n",
+      );
+      const readPodspecCached = jest.fn(() => ({
+        headerSearchPaths: ['$(PODS_TARGET_SRCROOT)/common/cpp'],
+      }));
+      let isolated;
+      jest.isolateModules(() => {
+        jest.doMock('../read-podspec', () => ({
+          ...jest.requireActual('../read-podspec'),
+          readPodspecCached,
+        }));
+        isolated = require('../generate-spm-autolinking');
+      });
+
+      const target = isolated.autolinkingDepToSpmTarget(
+        'react-native-consumer',
+        {
+          name: 'react-native-consumer',
+          root: sourceDir,
+          platforms: {ios: {sourceDir}},
+          swiftName: 'ReactNativeConsumer',
+        },
+        '/out',
+        new Map(),
+      );
+
+      expect(readPodspecCached).not.toHaveBeenCalled();
+      expect(target).not.toHaveProperty('headerSearchPaths');
+    } finally {
+      jest.dontMock('../read-podspec');
+      fs.rmSync(sourceDir, {recursive: true, force: true});
+    }
   });
 });

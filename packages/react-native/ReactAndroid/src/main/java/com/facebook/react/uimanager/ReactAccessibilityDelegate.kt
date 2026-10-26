@@ -15,6 +15,7 @@ import android.os.Message
 import android.view.View
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.EditText
 import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
@@ -57,7 +58,6 @@ public open class ReactAccessibilityDelegate( // The View this delegate is attac
         }
       }
   private val accessibilityActionsMap = HashMap<Int, String?>()
-  private var accessibilityLabelledBy: View? = null
 
   init {
     // We need to reset these two properties, as ExploreByTouchHelper sets focusable to "true" and
@@ -66,6 +66,12 @@ public open class ReactAccessibilityDelegate( // The View this delegate is attac
     // announcement coalescing.
     hostView.isFocusable = originalFocus
     hostView.importantForAccessibility = originalImportantForAccessibility
+  }
+
+  /** Forgets the actions cached from the props of a view that is about to be recycled. */
+  @JvmName("internal_prepareToRecycle")
+  internal fun prepareToRecycle() {
+    accessibilityActionsMap.clear()
   }
 
   override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfoCompat) {
@@ -90,9 +96,9 @@ public open class ReactAccessibilityDelegate( // The View this delegate is attac
 
     val accessibilityLabelledBy = host.getTag(R.id.labelled_by)
     if (accessibilityLabelledBy != null) {
-      this.accessibilityLabelledBy = findView(host.rootView, accessibilityLabelledBy as String)
-      if (this.accessibilityLabelledBy != null) {
-        info.setLabeledBy(this.accessibilityLabelledBy)
+      val labellingView = findView(host.rootView, accessibilityLabelledBy as String)
+      if (labellingView != null) {
+        info.setLabeledBy(labellingView)
       }
     }
 
@@ -227,6 +233,15 @@ public open class ReactAccessibilityDelegate( // The View this delegate is attac
     if (accessibilityActionsMap.containsKey(action)) {
       val eventData = createMap()
       eventData.putString("actionName", accessibilityActionsMap[action])
+      if (
+          action == AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id &&
+              args?.containsKey(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE) == true
+      ) {
+        eventData.putDouble(
+            "value",
+            args.getFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE).toDouble(),
+        )
+      }
       val reactContext = host.context as ReactContext
       if (reactContext.hasActiveReactInstance()) {
         val reactTag = host.id
@@ -399,7 +414,7 @@ public open class ReactAccessibilityDelegate( // The View this delegate is attac
       return TOP_ACCESSIBILITY_ACTION_EVENT
     }
 
-    public override fun getEventData(): WritableMap? {
+    override fun getEventData(): WritableMap? {
       return accessibilityEventData
     }
   }
@@ -437,6 +452,7 @@ public open class ReactAccessibilityDelegate( // The View this delegate is attac
     SPINBUTTON,
     SWITCH,
     TAB,
+    TABBAR,
     TABLIST,
     TIMER,
     LIST,
@@ -491,12 +507,17 @@ public open class ReactAccessibilityDelegate( // The View this delegate is attac
           RADIOGROUP,
           SCROLLBAR,
           TAB,
+          TABBAR,
           TABLIST,
           TIMER,
           TOOLBAR -> "android.view.View"
         }
       }
 
+      /**
+       * Returns the matching role, or [NONE] when [value] is null. Logs a soft exception and
+       * returns [NONE] when [value] is unrecognized.
+       */
       @JvmStatic
       public fun fromValue(value: String?): AccessibilityRole {
         if (value == null) {
@@ -508,7 +529,11 @@ public open class ReactAccessibilityDelegate( // The View this delegate is attac
             return role
           }
         }
-        throw IllegalArgumentException("Invalid accessibility role value: $value")
+        logSoftException(
+            ReactAccessibilityDelegate.TAG,
+            ReactNoCrashSoftException("Invalid accessibility role value: $value"),
+        )
+        return NONE
       }
 
       @JvmStatic
@@ -560,14 +585,16 @@ public open class ReactAccessibilityDelegate( // The View this delegate is attac
   public companion object {
     public const val TOP_ACCESSIBILITY_ACTION_EVENT: String = "topAccessibilityAction"
 
-    private val actionIdMap = mapOf<String, Int>(
-        "activate" to AccessibilityActionCompat.ACTION_CLICK.id,
-        "longpress" to AccessibilityActionCompat.ACTION_LONG_CLICK.id,
-        "increment" to AccessibilityActionCompat.ACTION_SCROLL_FORWARD.id,
-        "decrement" to AccessibilityActionCompat.ACTION_SCROLL_BACKWARD.id,
-        "expand" to AccessibilityActionCompat.ACTION_EXPAND.id,
-        "collapse" to AccessibilityActionCompat.ACTION_COLLAPSE.id,
-    )
+    private val actionIdMap =
+        mapOf<String, Int>(
+            "activate" to AccessibilityActionCompat.ACTION_CLICK.id,
+            "longpress" to AccessibilityActionCompat.ACTION_LONG_CLICK.id,
+            "increment" to AccessibilityActionCompat.ACTION_SCROLL_FORWARD.id,
+            "decrement" to AccessibilityActionCompat.ACTION_SCROLL_BACKWARD.id,
+            "setProgress" to AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id,
+            "expand" to AccessibilityActionCompat.ACTION_EXPAND.id,
+            "collapse" to AccessibilityActionCompat.ACTION_COLLAPSE.id,
+        )
 
     private const val TAG = "ReactAccessibilityDelegate"
     private var customActionCounter = 0x3f000000

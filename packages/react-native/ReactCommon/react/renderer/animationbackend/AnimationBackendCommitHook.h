@@ -7,7 +7,9 @@
 
 #pragma once
 
-#include <react/renderer/core/ReactPrimitives.h>
+#include <react/cxxstableapi/PrivateGuard.h>
+
+#include <React/RendererCore.h>
 #include <react/renderer/uimanager/UIManager.h>
 #include <react/renderer/uimanager/UIManagerCommitHook.h>
 #include "AnimatedPropsRegistry.h"

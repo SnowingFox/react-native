@@ -34,9 +34,10 @@
  *                              .spm-injected.json) and drop the marker.
  *   scaffold                   Generate Package.swift for community deps that
  *                              lack SPM support.
- *   sync / codegen / download  Advanced/internal: `sync` is invoked by the
- *                              generated Xcode build phase; `codegen` and
- *                              `download` run a single pipeline step.
+ *   sync                       Re-run the build-time autolinking sync and its
+ *                              checks. The generated Xcode build phase runs
+ *                              it; run it by hand after precompiling a module.
+ *   codegen / download         Advanced/internal: run a single pipeline step.
  *
  * Zero-arg `npx react-native spm` auto-detects: a freshly-scaffolded CocoaPods
  * project (clean tree, stock Podfile) → `add --deintegrate`; an injected
@@ -44,8 +45,10 @@
  * directing you to `--deintegrate`).
  *
  * Options:
- *   --version <ver>             React Native version (default: the resolved
- *                               node_modules/react-native version).
+ *   --version <ver>             React Native version. Pinned into
+ *                               .spm-injected.json and reused by later runs
+ *                               until a new one is passed (default: the
+ *                               resolved node_modules/react-native version).
  *   --yes                       Skip the dirty-pbxproj confirmation prompt.
  *   [add] --xcodeproj <path>    Which .xcodeproj to inject into (when several).
  *   [add] --product-name <name> Which app target to inject into (when several).
@@ -56,6 +59,14 @@
  *   [advanced] --download <auto|skip|force> Artifact policy (default: auto).
  *   [advanced] --skip-codegen   Skip the react-native codegen step.
  *   [advanced] --config-command <json> Override the autolinking config command.
+ *
+ * Environment ([add/update]; recorded in .spm-injected.json so Xcode builds
+ * reuse them, re-run `update` without one to turn it off):
+ *   RN_STRICT_API=1             Enforce React Native's C++ stable API: defines
+ *                               the RN_STRICT_API macro for the app target, its
+ *                               spm.modules packages and app codegen.
+ *   RN_ALLOW_FRAMEWORKS=1       Silence the stable API's "for frameworks"
+ *                               warning there: defines RN_ALLOW_FRAMEWORKS.
  *
  * Steps performed (add/update):
  *   1. react-native codegen → build/generated/ios/ + install SPM codegen template
@@ -91,16 +102,28 @@ const {
 const {main: generatePackage} = require('./spm/generate-spm-package');
 const {findSourcePath} = require('./spm/generate-spm-package');
 const {
+  PluginFrameworkMismatchError,
   SPM_INJECTED_MARKER,
   cleanupDanglingJavaScriptCoreRef,
   cleanupLeftoverPodsGroup,
   findInjectedXcodeproj,
   injectSpmIntoExistingXcodeproj,
+  readArtifactsVersionOverride,
+  readCxxApiDefines,
+  readMarker,
   readPinnedConfigCommand,
   removeSpmInjection,
 } = require('./spm/generate-spm-xcodeproj');
-const {scaffoldAll} = require('./spm/scaffold-package-swift');
 const {
+  MIN_IOS_VERSION_SUPPORTED,
+  resolveIosDeploymentTarget,
+} = require('./spm/ios-deployment-target');
+const {
+  refreshScaffoldedPlatformFloors,
+  scaffoldAll,
+} = require('./spm/scaffold-package-swift');
+const {
+  CXX_API_DEFINES,
   RemoteVersionError,
   buildPerAppHeaderTree,
   defaultCacheDir,
@@ -153,7 +176,7 @@ function parseArgs(argv /*: Array<string> */) /*: SetupArgs */ {
     .option('version', {
       type: 'string',
       describe:
-        'React Native version (e.g. 0.80.0). Defaults to the version in node_modules/react-native/package.json',
+        'React Native version (e.g. 0.80.0). Sticks: later runs reuse it until you pass a new one. Defaults to the version in node_modules/react-native/package.json',
     })
     .option('yes', {
       type: 'boolean',
@@ -377,19 +400,31 @@ function resolveReactNativeRoot(
   return reactNativeRoot;
 }
 
+// Explicit `--version` → the version an earlier `--version` pinned into the
+// injection marker → node_modules/react-native/package.json. The pin makes
+// `--version` stick for later flagless runs, which would otherwise re-point the
+// project at a different artifact slot than the one it was wired to.
 function determineVersion(
   args /*: SetupArgs */,
   reactNativeRoot /*: string */,
+  appRoot /*: string */,
 ) /*: string */ {
-  let version = args.version;
-  if (version == null) {
-    // $FlowFixMe[incompatible-type] JSON.parse returns any
-    const pkgJson /*: {version: string} */ = JSON.parse(
-      fs.readFileSync(path.join(reactNativeRoot, 'package.json'), 'utf8'),
-    );
-    version = pkgJson.version;
+  if (args.version != null) {
+    return args.version;
   }
-  return version;
+  const pinned = readArtifactsVersionOverride(appRoot);
+  if (pinned != null) {
+    log(
+      `Using version ${pinned} pinned in ${SPM_INJECTED_MARKER} by an earlier ` +
+        '--version. Pass --version to change it.',
+    );
+    return pinned;
+  }
+  // $FlowFixMe[incompatible-type] JSON.parse returns any
+  const pkgJson /*: {version: string} */ = JSON.parse(
+    fs.readFileSync(path.join(reactNativeRoot, 'package.json'), 'utf8'),
+  );
+  return pkgJson.version;
 }
 
 function runCodegenStep(
@@ -397,17 +432,24 @@ function runCodegenStep(
   appRoot /*: string */,
   reactNativeRoot /*: string */,
   skipCodegen /*: boolean */,
+  cxxApiDefines /*: ReadonlyArray<string> */,
 ) /*: void */ {
   if (skipCodegen) {
     // Output dir may already exist from a previous run; still refresh the
     // SPM template so cache-slot changes propagate.
     log('Skipping codegen (--skip-codegen)');
-    installSpmCodegenTemplate(appRoot, reactNativeRoot, {log});
+    installSpmCodegenTemplate(appRoot, reactNativeRoot, {log}, {cxxApiDefines});
     return;
   }
   log('Running react-native codegen...');
   try {
-    runCodegenAndInstallTemplate(projectRoot, appRoot, reactNativeRoot, {log});
+    runCodegenAndInstallTemplate(
+      projectRoot,
+      appRoot,
+      reactNativeRoot,
+      {log},
+      {cxxApiDefines},
+    );
   } catch {
     logError('Codegen failed. Continuing anyway...');
   }
@@ -437,12 +479,13 @@ async function runScaffold(
   appRoot /*: string */,
   projectRoot /*: string */,
   reactNativeRoot /*: string */,
+  iosDeploymentTarget /*: string */,
 ) /*: Promise<void> */ {
   // Resolve the cache slot identifier so the scaffolded files carry it as
   // a comment — that's how SPM's manifest hash bumps on slot transitions.
   let cacheSlotLabel /*: ?string */ = null;
   try {
-    const rawVersion = args.version ?? determineVersion(args, reactNativeRoot);
+    const rawVersion = determineVersion(args, reactNativeRoot, appRoot);
     const slotVersion = await resolveCacheSlotVersion(rawVersion);
     cacheSlotLabel = `${slotVersion}/dual-flavor`;
   } catch {
@@ -457,6 +500,7 @@ async function runScaffold(
       projectRoot,
       reactNativeRoot,
       cacheSlotLabel,
+      iosDeploymentTarget,
       // Always force a re-render so re-running after editing a podspec picks
       // up the new content.
       force: true,
@@ -475,15 +519,27 @@ async function runScaffold(
 
   if (written.length > 0) {
     log(`Scaffolded Package.swift for ${written.length} dep(s):`);
+    // Silent for the outcomes that changed nothing ('already-set', 'skipped').
+    const nameOutcome = (outcome /*: ?string */) /*: string */ => {
+      if (outcome === 'created' || outcome === 'inserted') {
+        return " — also recorded 'swiftpmConfig.name' in its package.json";
+      }
+      if (outcome === 'failed') {
+        return " — could NOT record 'swiftpmConfig.name'; the manifest is written, the name is not";
+      }
+      return '';
+    };
     for (const r of written) {
-      log(`  • ${r.depName}`);
+      log(`  • ${r.depName}${nameOutcome(r.swiftpmName)}`);
     }
     log('');
     log(
       'node_modules is NOT committed and is wiped by `npm install`. To keep\n' +
         'these manifests, create and commit a patch with a tool like patch-package:\n' +
         '  • `npx patch-package <dep>` for each scaffolded dep, then commit the patch.\n' +
-        'Also consider asking the maintainer to ship a Package.swift upstream.\n' +
+        'The patch also captures any recorded `swiftpmConfig.name`, which is what\n' +
+        'lets the library be named without reading its podspec. Better still, ask the\n' +
+        'maintainer to ship both upstream.\n' +
         'Without a committed patch the build will hard-error again after a fresh install.',
     );
     log('');
@@ -761,6 +817,29 @@ function resolveInjectionTarget(
   return {path: path.join(appRoot, names[0])};
 }
 
+/** The app's own floor for every manifest this run generates, logged once. */
+function resolveAppIosDeploymentTarget(
+  args /*: SetupArgs */,
+  appRoot /*: string */,
+) /*: string */ {
+  const target = resolveInjectionTarget(args, appRoot);
+  const xcodeprojPath = target.path ?? null;
+  const read = resolveIosDeploymentTarget({
+    xcodeprojPath,
+    targetUuid:
+      xcodeprojPath != null ? readMarker(xcodeprojPath)?.targetUuid : null,
+    targetName: args.productName,
+  });
+  const value = read ?? MIN_IOS_VERSION_SUPPORTED;
+  const origin =
+    read != null && xcodeprojPath != null
+      ? `from ${path.basename(xcodeprojPath)}`
+      : // `sync` and `scaffold` don't otherwise surface why no project was picked.
+        `react-native default${target.error != null ? `; ${target.error}` : ''}`;
+  log(`iOS deployment target: ${value} (${origin})`);
+  return value;
+}
+
 /**
  * Inject SPM packages into the user's existing .xcodeproj, in place — the only
  * xcodeproj strategy (`add` and `update` both run this; there is no
@@ -772,6 +851,7 @@ async function setupXcodeproj(
   appRoot /*: string */,
   reactNativeRoot /*: string */,
   action /*: string */,
+  cxxApiDefines /*: ReadonlyArray<string> */,
 ) /*: Promise<void> */ {
   const target = resolveInjectionTarget(args, appRoot);
   if (target.error != null) {
@@ -849,6 +929,7 @@ async function setupXcodeproj(
     // generate-spm-xcodeproj.js).
     artifactsVersionOverride: args.version ?? null,
     configCommand: resolveConfigCommandToPin(args),
+    cxxApiDefines,
   });
   if (result.status !== 'injected') {
     logError(`SPM injection failed: ${result.reason}`);
@@ -906,6 +987,22 @@ function logNextSteps(
   log('  • Build and run on Simulator or device');
   log('');
   log('To remove SPM later: `npx react-native spm deinit`');
+}
+
+// The React Native C++ stable API macros this run defines for the app target,
+// its spm.modules packages and app codegen (CXX_API_DEFINES). `add`/`update`
+// read each from the env var of the same name (=1; unset turns it off, as with
+// `pod install`) and record the result in the injection marker; every other
+// action, including the build-time `sync`, reuses the recorded macros because
+// Xcode builds inherit neither the env vars nor the shell that set them.
+function resolveCxxApiDefines(
+  action /*: string */,
+  appRoot /*: string */,
+) /*: Array<string> */ {
+  if (action === 'add' || action === 'update') {
+    return CXX_API_DEFINES.filter(name => process.env[name] === '1');
+  }
+  return readCxxApiDefines(appRoot);
 }
 
 // The autolinking config command for this run: an explicit `--config-command`
@@ -1090,12 +1187,27 @@ async function main(argv /*:: ?: Array<string> */) /*: Promise<void> */ {
     }
     log(`Wrote ${path.relative(appRoot, autolinkingConfigResult.outputPath)}`);
   }
+  const iosDeploymentTarget /*: string */ = needsCliConfig
+    ? resolveAppIosDeploymentTarget(args, appRoot)
+    : MIN_IOS_VERSION_SUPPORTED;
   const reactNativeRoot = resolveReactNativeRoot(
     autolinkingConfigResult,
     projectRoot,
   );
-  const version = determineVersion(args, reactNativeRoot);
+  const version = determineVersion(args, reactNativeRoot, appRoot);
   log(`React Native version: ${version}`);
+
+  const cxxApiDefines = resolveCxxApiDefines(action, appRoot);
+  if (cxxApiDefines.length > 0) {
+    log(
+      `C++ stable API: defining ${cxxApiDefines.join(', ')} in the app ` +
+        'target, its spm.modules packages and app codegen',
+    );
+  }
+  const cxxApiDefineArgs = cxxApiDefines.flatMap(name => [
+    '--cxx-api-define',
+    name,
+  ]);
 
   // Resolve remote SPM mode ONCE up front. remotePackageConfig throws
   // RemoteVersionError when remote mode is active but no usable RN version can
@@ -1121,7 +1233,7 @@ async function main(argv /*:: ?: Array<string> */) /*: Promise<void> */ {
   // "Artifacts already present in ...".
 
   if (action === 'codegen') {
-    runCodegenStep(projectRoot, appRoot, reactNativeRoot, false);
+    runCodegenStep(projectRoot, appRoot, reactNativeRoot, false, cxxApiDefines);
     return;
   }
 
@@ -1133,10 +1245,16 @@ async function main(argv /*:: ?: Array<string> */) /*: Promise<void> */ {
         appRoot,
         '--react-native-root',
         reactNativeRoot,
+        '--ios-deployment-target',
+        iosDeploymentTarget,
+        ...cxxApiDefineArgs,
       ]);
     } catch (e) {
-      if (e instanceof MissingManifestError) {
-        // The per-dep `error:` lines were already printed by the autolinker.
+      if (
+        e instanceof MissingManifestError ||
+        e instanceof PluginFrameworkMismatchError
+      ) {
+        // The `error:` lines were already printed.
         // Exit 2 (distinct from generic failure) so the Xcode build phase can
         // turn this into a hard build error while staying lenient on transient
         // sync failures.
@@ -1166,10 +1284,41 @@ async function main(argv /*:: ?: Array<string> */) /*: Promise<void> */ {
   // visible and fixed deliberately (scaffold + patch-package, or upstream).
   // Auto-scaffolding would silently hide that real error.
   if (action === 'scaffold') {
-    await runScaffold(args, appRoot, projectRoot, reactNativeRoot);
+    await runScaffold(
+      args,
+      appRoot,
+      projectRoot,
+      reactNativeRoot,
+      iosDeploymentTarget,
+    );
   }
 
-  runCodegenStep(projectRoot, appRoot, reactNativeRoot, args.skipCodegen);
+  runCodegenStep(
+    projectRoot,
+    appRoot,
+    reactNativeRoot,
+    args.skipCodegen,
+    cxxApiDefines,
+  );
+
+  // A manifest scaffolded before the app's deployment target changed (or by a
+  // pre-v20 scaffolder) would pin a floor SwiftPM then refuses to link against.
+  if (
+    (action === 'add' || action === 'update') &&
+    autolinkingConfigResult != null
+  ) {
+    for (const refreshed of refreshScaffoldedPlatformFloors({
+      appRoot,
+      autolinkingJsonPath: autolinkingConfigResult.outputPath,
+      iosDeploymentTarget,
+    })) {
+      log(
+        `Refreshed platform floor in ${path.relative(appRoot, refreshed.path)}: ` +
+          `${refreshed.from} → ${refreshed.to}`,
+      );
+    }
+  }
+
   log('Generating build/generated/autolinking/Package.swift...');
   try {
     generateAutolinking([
@@ -1177,6 +1326,9 @@ async function main(argv /*:: ?: Array<string> */) /*: Promise<void> */ {
       appRoot,
       '--react-native-root',
       reactNativeRoot,
+      '--ios-deployment-target',
+      iosDeploymentTarget,
+      ...cxxApiDefineArgs,
     ]);
   } catch (e) {
     if (e instanceof MissingManifestError) {
@@ -1218,7 +1370,7 @@ async function main(argv /*:: ?: Array<string> */) /*: Promise<void> */ {
   }
 
   // (Re)install the static codegen Package.swift template once build/generated/ios exists.
-  installSpmCodegenTemplate(appRoot, reactNativeRoot, {log});
+  installSpmCodegenTemplate(appRoot, reactNativeRoot, {log}, {cxxApiDefines});
 
   // Build the per-app generated-headers farm (vended as the ReactAppHeaders
   // SPM target inside the codegen package). React core headers need no trees
@@ -1235,7 +1387,7 @@ async function main(argv /*:: ?: Array<string> */) /*: Promise<void> */ {
   // Xcodeproj setup: in-place injection into the existing project (the only
   // strategy — no rename, no from-scratch; git is the safety net).
   try {
-    await setupXcodeproj(args, appRoot, reactNativeRoot, action);
+    await setupXcodeproj(args, appRoot, reactNativeRoot, action, cxxApiDefines);
   } catch (e) {
     logError(`xcodeproj setup failed: ${e.message}`);
     if (process.exitCode == null) {
@@ -1256,12 +1408,15 @@ if (require.main === module) {
 module.exports = {
   main,
   detectStandardRnLayoutRedirect,
+  determineVersion,
   findInjectedXcodeproj,
   generateAutolinkingConfigOrFailClosed,
   parseArgs,
   resolveAction,
+  resolveAppIosDeploymentTarget,
   resolveConfigCommandToPin,
   resolveExplicitConfigCommand,
+  resolveCxxApiDefines,
   shouldAutoDeintegrate,
   ensureBothArtifactFlavors,
 };

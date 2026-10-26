@@ -7,7 +7,9 @@
 
 #pragma once
 
-#include <react/renderer/core/ShadowNode.h>
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/RendererCore.h>
 #include <react/renderer/mounting/ShadowViewMutation.h>
 
 namespace facebook::react {

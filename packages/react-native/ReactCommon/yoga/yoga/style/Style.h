@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <type_traits>
@@ -30,6 +31,7 @@
 #include <yoga/enums/Wrap.h>
 #include <yoga/numeric/FloatOptional.h>
 #include <yoga/style/GridLine.h>
+#include <yoga/style/GridStyle.h>
 #include <yoga/style/GridTrack.h>
 #include <yoga/style/StyleLength.h>
 #include <yoga/style/StyleSizeLength.h>
@@ -209,84 +211,84 @@ class YG_EXPORT Style {
 
   // Grid Container Properties
   const GridTrackList& gridTemplateColumns() const {
-    return gridTemplateColumns_;
+    return grid_.get().templateColumns;
   }
   void setGridTemplateColumns(GridTrackList value) {
-    gridTemplateColumns_ = std::move(value);
+    grid_.ensure().templateColumns = std::move(value);
   }
   void resizeGridTemplateColumns(size_t count) {
-    gridTemplateColumns_.resize(count);
+    grid_.ensure().templateColumns.resize(count);
   }
   void setGridTemplateColumnAt(size_t index, GridTrackSize value) {
-    gridTemplateColumns_[index] = value;
+    grid_.ensure().templateColumns[index] = value;
   }
 
   const GridTrackList& gridTemplateRows() const {
-    return gridTemplateRows_;
+    return grid_.get().templateRows;
   }
   void setGridTemplateRows(GridTrackList value) {
-    gridTemplateRows_ = std::move(value);
+    grid_.ensure().templateRows = std::move(value);
   }
   void resizeGridTemplateRows(size_t count) {
-    gridTemplateRows_.resize(count);
+    grid_.ensure().templateRows.resize(count);
   }
   void setGridTemplateRowAt(size_t index, GridTrackSize value) {
-    gridTemplateRows_[index] = value;
+    grid_.ensure().templateRows[index] = value;
   }
 
   const GridTrackList& gridAutoColumns() const {
-    return gridAutoColumns_;
+    return grid_.get().autoColumns;
   }
   void setGridAutoColumns(GridTrackList value) {
-    gridAutoColumns_ = std::move(value);
+    grid_.ensure().autoColumns = std::move(value);
   }
   void resizeGridAutoColumns(size_t count) {
-    gridAutoColumns_.resize(count);
+    grid_.ensure().autoColumns.resize(count);
   }
   void setGridAutoColumnAt(size_t index, GridTrackSize value) {
-    gridAutoColumns_[index] = value;
+    grid_.ensure().autoColumns[index] = value;
   }
 
   const GridTrackList& gridAutoRows() const {
-    return gridAutoRows_;
+    return grid_.get().autoRows;
   }
   void setGridAutoRows(GridTrackList value) {
-    gridAutoRows_ = std::move(value);
+    grid_.ensure().autoRows = std::move(value);
   }
   void resizeGridAutoRows(size_t count) {
-    gridAutoRows_.resize(count);
+    grid_.ensure().autoRows.resize(count);
   }
   void setGridAutoRowAt(size_t index, GridTrackSize value) {
-    gridAutoRows_[index] = value;
+    grid_.ensure().autoRows[index] = value;
   }
 
   // Grid Item Properties
   const GridLine& gridColumnStart() const {
-    return gridColumnStart_;
+    return grid_.get().columnStart;
   }
   void setGridColumnStart(GridLine value) {
-    gridColumnStart_ = value;
+    grid_.ensure().columnStart = value;
   }
 
   const GridLine& gridColumnEnd() const {
-    return gridColumnEnd_;
+    return grid_.get().columnEnd;
   }
   void setGridColumnEnd(GridLine value) {
-    gridColumnEnd_ = value;
+    grid_.ensure().columnEnd = value;
   }
 
   const GridLine& gridRowStart() const {
-    return gridRowStart_;
+    return grid_.get().rowStart;
   }
   void setGridRowStart(GridLine value) {
-    gridRowStart_ = value;
+    grid_.ensure().rowStart = value;
   }
 
   const GridLine& gridRowEnd() const {
-    return gridRowEnd_;
+    return grid_.get().rowEnd;
   }
   void setGridRowEnd(GridLine value) {
-    gridRowEnd_ = value;
+    grid_.ensure().rowEnd = value;
   }
 
   FloatOptional resolvedMinDimension(
@@ -338,6 +340,22 @@ class YG_EXPORT Style {
     return value +
         (dimensionPaddingAndBorder.isDefined() ? dimensionPaddingAndBorder
                                                : FloatOptional{0.0});
+  }
+
+  // Percentage margins and paddings resolve against the owner's width on both
+  // axes, and a percentage size or size bound against the owner's size on its
+  // own axis.
+  bool resolvesAgainstOwnerWidth() const {
+    return anyIsPercent(margin_) || anyIsPercent(padding_) ||
+        dimensions_[yoga::to_underlying(Dimension::Width)].isPercent() ||
+        minDimensions_[yoga::to_underlying(Dimension::Width)].isPercent() ||
+        maxDimensions_[yoga::to_underlying(Dimension::Width)].isPercent();
+  }
+
+  bool resolvesAgainstOwnerHeight() const {
+    return dimensions_[yoga::to_underlying(Dimension::Height)].isPercent() ||
+        minDimensions_[yoga::to_underlying(Dimension::Height)].isPercent() ||
+        maxDimensions_[yoga::to_underlying(Dimension::Height)].isPercent();
   }
 
   FloatOptional aspectRatio() const {
@@ -652,6 +670,7 @@ class YG_EXPORT Style {
         alignItems_ == other.alignItems_ && alignSelf_ == other.alignSelf_ &&
         positionType_ == other.positionType_ && flexWrap_ == other.flexWrap_ &&
         overflow_ == other.overflow_ && display_ == other.display_ &&
+        boxSizing_ == other.boxSizing_ &&
         numbersEqual(flex_, pool_, other.flex_, other.pool_) &&
         numbersEqual(flexGrow_, pool_, other.flexGrow_, other.pool_) &&
         numbersEqual(flexShrink_, pool_, other.flexShrink_, other.pool_) &&
@@ -667,20 +686,22 @@ class YG_EXPORT Style {
         sizeLengthsEqual(
                maxDimensions_, pool_, other.maxDimensions_, other.pool_) &&
         numbersEqual(aspectRatio_, pool_, other.aspectRatio_, other.pool_) &&
-        gridTemplateColumns_ == other.gridTemplateColumns_ &&
-        gridTemplateRows_ == other.gridTemplateRows_ &&
-        gridAutoColumns_ == other.gridAutoColumns_ &&
-        gridAutoRows_ == other.gridAutoRows_ &&
-        gridColumnStart_ == other.gridColumnStart_ &&
-        gridColumnEnd_ == other.gridColumnEnd_ &&
-        gridRowStart_ == other.gridRowStart_ &&
-        gridRowEnd_ == other.gridRowEnd_;
+        grid_ == other.grid_;
   }
 
  private:
   using Dimensions = std::array<StyleValueHandle, ordinalCount<Dimension>()>;
   using Edges = std::array<StyleValueHandle, ordinalCount<Edge>()>;
   using Gutters = std::array<StyleValueHandle, ordinalCount<Gutter>()>;
+
+  template <size_t N>
+  static inline bool anyIsPercent(
+      const std::array<StyleValueHandle, N>& handles) {
+    return std::any_of(
+        handles.begin(), handles.end(), [](const StyleValueHandle& handle) {
+          return handle.isPercent();
+        });
+  }
 
   static inline bool numbersEqual(
       const StyleValueHandle& lhsHandle,
@@ -929,15 +950,8 @@ class YG_EXPORT Style {
   Dimensions maxDimensions_{};
   StyleValueHandle aspectRatio_{};
 
-  // Grid properties
-  GridTrackList gridTemplateColumns_{};
-  GridTrackList gridTemplateRows_{};
-  GridTrackList gridAutoColumns_{};
-  GridTrackList gridAutoRows_{};
-  GridLine gridColumnStart_{};
-  GridLine gridColumnEnd_{};
-  GridLine gridRowStart_{};
-  GridLine gridRowEnd_{};
+  // Grid properties, allocated only when one of them is set
+  GridStyleStorage grid_{};
 
   StyleValuePool pool_;
 };

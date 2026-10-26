@@ -35,16 +35,19 @@ module.exports.getCacheKey = () => {
   const {readFileSync} = require('node:fs');
   const key = createHash('md5');
   [
+    readFileSync(require.resolve('../package.json')),
     readFileSync(__filename),
     readFileSync(require.resolve('./configs/main.js')),
     readFileSync(require.resolve('./configs/hmr.js')),
     readFileSync(require.resolve('./configs/lazy-imports.js')),
     readFileSync(require.resolve('./passthrough-syntax-plugins.js')),
     readFileSync(require.resolve('./plugin-warn-on-deep-imports.js')),
+    readFileSync(require.resolve('./inline-platform-plugin.js')),
   ].forEach(part => key.update(part));
   cacheKey = key.digest('hex');
   return cacheKey;
 };
 
 module.exports.getPreset = main.getPreset;
+module.exports.inlinePlatformPlugin = require('./inline-platform-plugin');
 module.exports.passthroughSyntaxPlugins = require('./passthrough-syntax-plugins');

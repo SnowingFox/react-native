@@ -7,7 +7,9 @@
 
 #pragma once
 
-#include <ReactCommon/CallInvoker.h>
+#include <react/cxxstableapi/PrivateGuard.h>
+
+#include <React/CallInvoker.h>
 #include <cxxreact/MessageQueueThread.h>
 #include <memory>
 

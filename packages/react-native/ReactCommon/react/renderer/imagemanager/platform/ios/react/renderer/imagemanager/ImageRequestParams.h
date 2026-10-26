@@ -7,7 +7,9 @@
 
 #pragma once
 
-#include <react/renderer/graphics/Float.h>
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
+#include <React/Graphics.h>
 
 namespace facebook::react {
 

@@ -4,9 +4,11 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @flow
+ * @flow strict-local
  * @format
  */
+
+// flowlint unsafe-getters-setters:off
 
 import type {EventCallback} from '../../src/private/webapis/dom/events/EventTarget';
 import type Blob from './Blob';
@@ -133,6 +135,7 @@ class FileReader extends EventTarget {
         const base64 = text.split(',')[1];
         const typedArray = toByteArray(base64);
 
+        // $FlowFixMe[incompatible-type]
         this._result = typedArray.buffer;
         this._setReadyState(DONE);
       },

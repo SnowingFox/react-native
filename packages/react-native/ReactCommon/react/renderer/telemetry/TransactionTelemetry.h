@@ -7,11 +7,13 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <chrono>
 #include <cstdint>
 #include <functional>
 
-#include <react/utils/Telemetry.h>
+#include <React/Utils.h>
 
 namespace facebook::react {
 

@@ -7,12 +7,15 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <limits>
 
+#include <React/Graphics.h>
+#include <React/RendererCore.h>
+#include <React/RendererDebug.h>
+#include <React/Utils.h>
 #include <react/renderer/attributedstring/primitives.h>
-#include <react/renderer/debug/DebugStringConvertible.h>
-#include <react/renderer/graphics/Float.h>
-#include <react/utils/hash_combine.h>
 
 namespace facebook::react {
 
@@ -46,6 +49,8 @@ class ParagraphAttributes : public DebugStringConvertible {
    */
   TextBreakStrategy textBreakStrategy{TextBreakStrategy::HighQuality};
 
+  TextWidthMode textWidthMode{TextWidthMode::Auto};
+
   /*
    * Enables font size adjustment to fit constrained boundaries.
    */
@@ -64,11 +69,22 @@ class ParagraphAttributes : public DebugStringConvertible {
   HyphenationFrequency android_hyphenationFrequency{};
 
   /*
-   * In case of font size adjustment enabled, defines minimum and maximum
-   * font sizes.
+   * Strictness of the line-breaking rules (CSS `line-break`).
+   * Currently applied on Android only.
+   */
+  LineBreak lineBreak{};
+
+  /*
+   * Word-based line breaking (CSS `word-break`).
+   * Currently applied on Android only.
+   */
+  WordBreak wordBreak{};
+
+  /*
+   * In case of font size adjustment enabled, defines the minimum font size.
+   * Deprecated in favor of minimumFontScale.
    */
   Float minimumFontSize{std::numeric_limits<Float>::quiet_NaN()};
-  Float maximumFontSize{std::numeric_limits<Float>::quiet_NaN()};
 
   /*
    * Specifies the smallest possible scale a font can reach when
@@ -103,11 +119,13 @@ struct hash<facebook::react::ParagraphAttributes> {
         attributes.maximumNumberOfLines,
         attributes.ellipsizeMode,
         attributes.textBreakStrategy,
+        attributes.textWidthMode,
         attributes.adjustsFontSizeToFit,
         attributes.minimumFontSize,
-        attributes.maximumFontSize,
         attributes.includeFontPadding,
         attributes.android_hyphenationFrequency,
+        attributes.lineBreak,
+        attributes.wordBreak,
         attributes.minimumFontScale,
         attributes.textAlignVertical);
   }

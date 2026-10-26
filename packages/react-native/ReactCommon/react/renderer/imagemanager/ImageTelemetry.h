@@ -7,8 +7,10 @@
 
 #pragma once
 
-#include <react/renderer/core/ReactPrimitives.h>
-#include <react/utils/Telemetry.h>
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
+#include <React/RendererCore.h>
+#include <React/Utils.h>
 
 namespace facebook::react {
 

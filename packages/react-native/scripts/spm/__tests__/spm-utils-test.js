@@ -11,11 +11,24 @@
 'use strict';
 
 const {
+  AUTOLINKED_PACKAGE_NAME,
+  REACT_CODEGEN_APP_PRODUCTS,
+  REACT_CODEGEN_PACKAGE_NAME,
+  REACT_CODEGEN_PRODUCTS,
+  REACT_HEADERS_TARGET_DIR,
+  REACT_NATIVE_HEADERS_PRODUCT,
+  REACT_NATIVE_PACKAGE_NAME,
+  REACT_NATIVE_PRODUCTS,
+  REACT_NATIVE_UMBRELLA_PRODUCT,
+  REACT_NATIVE_XCFRAMEWORK_PRODUCTS,
   RemoteVersionError,
+  RESERVED_SWIFT_NAMES,
   buildPerAppHeaderTree,
   defaultCacheDir,
   displayPath,
+  installSpmCodegenTemplate,
   isPublishableVersion,
+  isValidSwiftName,
   makeLogger,
   readPackageJson,
   remotePackageConfig,
@@ -23,6 +36,8 @@ const {
   resolveReactNativeRoot,
   runCodegenAndInstallTemplate,
   sharedCacheDir,
+  swiftNameKey,
+  toC99Name,
   toSwiftName,
 } = require('../spm-utils');
 const fs = require('node:fs');
@@ -43,6 +58,141 @@ describe('toSwiftName', () => {
     ['my_great_app', 'MyGreatApp'],
   ])('toSwiftName(%j) => %j', (input, expected) => {
     expect(toSwiftName(input)).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isValidSwiftName — the charset rule `spm.name` enforces.
+// ---------------------------------------------------------------------------
+
+describe('isValidSwiftName', () => {
+  it.each(['worklets', 'ReactNativeFoo', 'hermes-engine', 'react_native_foo'])(
+    'accepts %j',
+    name => {
+      expect(isValidSwiftName(name)).toBe(true);
+    },
+  );
+
+  it.each(['', 'foo bar', 'foo/bar', 'foo.bar', '9lives', 42, null])(
+    'rejects %j',
+    name => {
+      expect(isValidSwiftName(name)).toBe(false);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// toC99Name / swiftNameKey — what SwiftPM compiles a target name as, and the
+// key two target names have to differ in to be two targets.
+// ---------------------------------------------------------------------------
+
+describe('toC99Name', () => {
+  it.each([
+    ['RNSVG', 'RNSVG'],
+    ['react-native-svg', 'react_native_svg'],
+    ['react_native_svg', 'react_native_svg'],
+    ['Some.Pod', 'Some_Pod'],
+    ['React-Core', 'React_Core'],
+    ['3d-lib', '_3d_lib'],
+  ])('toC99Name(%j) => %j', (input, expected) => {
+    expect(toC99Name(input)).toBe(expected);
+  });
+});
+
+describe('swiftNameKey', () => {
+  it('collapses names that differ only in punctuation', () => {
+    expect(swiftNameKey('foo-bar')).toBe(swiftNameKey('foo_bar'));
+  });
+
+  it('collapses names that differ only in case', () => {
+    expect(swiftNameKey('worklets')).toBe(swiftNameKey('Worklets'));
+  });
+
+  it('keeps genuinely different names apart', () => {
+    expect(swiftNameKey('RNSVG')).not.toBe(swiftNameKey('RNScreens'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reserved Swift names — the one list the manifests and the guard both use
+// ---------------------------------------------------------------------------
+
+describe('reserved Swift names', () => {
+  it('names the React Native package and the per-app codegen package', () => {
+    expect(REACT_NATIVE_PACKAGE_NAME).toBe('ReactNative');
+    expect(REACT_CODEGEN_PACKAGE_NAME).toBe('React-GeneratedCode');
+  });
+
+  it('pins each product list to its literal names', () => {
+    expect(REACT_NATIVE_PRODUCTS).toEqual([
+      'ReactHeaders',
+      'ReactNativeHeaders',
+      'ReactNativeDependenciesHeaders',
+    ]);
+    expect(REACT_CODEGEN_PRODUCTS).toEqual(['ReactAppHeaders']);
+    expect(REACT_CODEGEN_APP_PRODUCTS).toEqual([
+      'ReactCodegen',
+      'ReactAppDependencyProvider',
+    ]);
+  });
+
+  it('tags each React Native product by kind, so no consumer has to infer it from position', () => {
+    expect(REACT_NATIVE_UMBRELLA_PRODUCT).toBe('ReactHeaders');
+    expect(REACT_NATIVE_HEADERS_PRODUCT).toBe('ReactNativeHeaders');
+    expect(REACT_NATIVE_XCFRAMEWORK_PRODUCTS).toEqual([
+      'ReactNativeHeaders',
+      'ReactNativeDependenciesHeaders',
+    ]);
+  });
+
+  it('names the autolinking aggregator package (which shares its name with its product)', () => {
+    expect(AUTOLINKED_PACKAGE_NAME).toBe('Autolinked');
+  });
+
+  it('names the invariant React headers target directory', () => {
+    expect(REACT_HEADERS_TARGET_DIR).toBe('ReactHeadersTarget');
+  });
+
+  // The one test that pins the literal strings: every other check compares
+  // constants to constants, so this is what would catch a rename.
+  it('reserves exactly the names React Native puts in a manifest', () => {
+    expect([...RESERVED_SWIFT_NAMES].sort()).toEqual([
+      'Autolinked',
+      'React-GeneratedCode',
+      'ReactAppDependencyProvider',
+      'ReactAppHeaders',
+      'ReactCodegen',
+      'ReactHeaders',
+      'ReactNative',
+      'ReactNativeDependenciesHeaders',
+      'ReactNativeHeaders',
+    ]);
+  });
+
+  it('holds names that real generated manifests actually use', () => {
+    const {
+      generateXCFrameworksPackageSwift,
+    } = require('../generate-spm-package');
+    const manifest = generateXCFrameworksPackageSwift();
+    for (const name of [REACT_NATIVE_PACKAGE_NAME, ...REACT_NATIVE_PRODUCTS]) {
+      expect(manifest).toContain(`"${name}"`);
+    }
+  });
+
+  it('does NOT reserve the headers target dir — target names only have to be unique within their own package', () => {
+    expect(RESERVED_SWIFT_NAMES).not.toContain(REACT_HEADERS_TARGET_DIR);
+  });
+
+  it('freezes the lists so no caller can mutate the shared source of truth', () => {
+    for (const list of [
+      REACT_NATIVE_PRODUCTS,
+      REACT_CODEGEN_PRODUCTS,
+      REACT_CODEGEN_APP_PRODUCTS,
+      RESERVED_SWIFT_NAMES,
+    ]) {
+      expect(Array.isArray(list)).toBe(true);
+      expect(Object.isFrozen(list)).toBe(true);
+    }
   });
 });
 
@@ -504,6 +654,58 @@ describe('runCodegenAndInstallTemplate', () => {
     // The SPM sync re-points the xcframework symlinks and installs the template
     // itself afterwards, so this in-codegen install must be suppressed.
     expect(fs.existsSync(codegenPkgSwift)).toBe(false);
+  });
+});
+
+describe('installSpmCodegenTemplate', () => {
+  let tempDir;
+  let appRoot;
+  let codegenPkgSwift;
+  // The real react-native package root, so the shipped template is exercised.
+  const reactNativeRoot = path.resolve(__dirname, '..', '..', '..');
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-codegen-template-'));
+    appRoot = path.join(tempDir, 'app');
+    fs.mkdirSync(path.join(appRoot, 'build', 'generated', 'ios'), {
+      recursive: true,
+    });
+    codegenPkgSwift = path.join(
+      appRoot,
+      'build',
+      'generated',
+      'ios',
+      'Package.swift',
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, {recursive: true, force: true});
+  });
+
+  const countOf = (content, define) =>
+    (content.match(new RegExp(`\\.define\\("${define}"\\)`, 'g')) ?? []).length;
+
+  it('defines RN_ALLOW_FRAMEWORKS in every C++ target of the generated code by default, and nothing else', () => {
+    installSpmCodegenTemplate(appRoot, reactNativeRoot);
+    const content = fs.readFileSync(codegenPkgSwift, 'utf8');
+    const ndebugCount = (content.match(/\.define\("NDEBUG"/g) ?? []).length;
+    expect(ndebugCount).toBeGreaterThan(0);
+    expect(countOf(content, 'RN_ALLOW_FRAMEWORKS')).toBe(ndebugCount);
+    expect(countOf(content, 'RN_STRICT_API')).toBe(0);
+  });
+
+  it("adds the app's opt-ins after every NDEBUG define, without repeating RN_ALLOW_FRAMEWORKS", () => {
+    installSpmCodegenTemplate(appRoot, reactNativeRoot, undefined, {
+      cxxApiDefines: ['RN_STRICT_API', 'RN_ALLOW_FRAMEWORKS'],
+    });
+    const content = fs.readFileSync(codegenPkgSwift, 'utf8');
+    const ndebugCount = (content.match(/\.define\("NDEBUG"/g) ?? []).length;
+    expect(countOf(content, 'RN_STRICT_API')).toBe(ndebugCount);
+    expect(countOf(content, 'RN_ALLOW_FRAMEWORKS')).toBe(ndebugCount);
+    expect(content).toMatch(
+      /\.define\("NDEBUG", \.when\(configuration: \.release\)\),\n[ \t]*\.define\("RN_STRICT_API"\),/,
+    );
   });
 });
 

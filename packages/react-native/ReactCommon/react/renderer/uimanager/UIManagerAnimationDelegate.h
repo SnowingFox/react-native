@@ -7,10 +7,12 @@
 
 #pragma once
 
-#include <jsi/jsi.h>
+#include <react/cxxstableapi/FrameworksGuard.h>
 
-#include <react/renderer/componentregistry/ComponentDescriptorFactory.h>
-#include <react/renderer/core/RawValue.h>
+#include <React/ComponentRegistry.h>
+#include <React/RendererCore.h>
+
+#include <jsi/jsi.h>
 
 namespace facebook::react {
 

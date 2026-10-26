@@ -7,14 +7,14 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <memory>
 #include <shared_mutex>
 
+#include <React/RendererCore.h>
+#include <React/Utils.h>
 #include <folly/dynamic.h>
-#include <react/renderer/core/LayoutConstraints.h>
-#include <react/renderer/core/LayoutContext.h>
-#include <react/renderer/core/ReactPrimitives.h>
-#include <react/utils/ContextContainer.h>
 
 namespace facebook::react {
 

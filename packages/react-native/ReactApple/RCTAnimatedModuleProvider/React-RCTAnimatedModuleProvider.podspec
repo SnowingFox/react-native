@@ -55,9 +55,12 @@ Pod::Spec.new do |s|
   s.dependency "React-Fabric/animated"
   s.dependency "Yoga"
 
+  add_dependency(s, "React-Fabric")
   add_dependency(s, "ReactCommon", :subspec => "turbomodule/core", :additional_framework_paths => ["react/nativemodule/core"])
 
   depend_on_js_engine(s)
   add_rn_third_party_dependencies(s)
   add_rncore_dependency(s)
+
+  mark_as_react_native_build(s)
 end

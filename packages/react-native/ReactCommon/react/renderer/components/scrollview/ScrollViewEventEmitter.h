@@ -7,11 +7,12 @@
 
 #pragma once
 
-#include <memory>
+#include <react/cxxstableapi/FrameworksGuard.h>
 
+#include <React/View.h>
 #include <react/renderer/components/scrollview/ScrollEvent.h>
-#include <react/renderer/components/view/ViewEventEmitter.h>
-#include <react/renderer/core/EventEmitter.h>
+
+#include <string>
 
 namespace facebook::react {
 

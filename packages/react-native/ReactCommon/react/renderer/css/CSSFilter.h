@@ -7,10 +7,13 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <array>
 #include <optional>
 #include <variant>
 
+#include <React/Utils.h>
 #include <react/renderer/css/CSSColor.h>
 #include <react/renderer/css/CSSCompoundDataType.h>
 #include <react/renderer/css/CSSDataType.h>

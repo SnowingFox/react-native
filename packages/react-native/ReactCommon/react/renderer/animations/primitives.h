@@ -7,9 +7,11 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/Graphics.h>
+#include <React/RendererCore.h>
 #include <react/renderer/animations/LayoutAnimationCallbackWrapper.h>
-#include <react/renderer/core/ReactPrimitives.h>
-#include <react/renderer/graphics/Float.h>
 #include <react/renderer/mounting/ShadowView.h>
 #include <react/renderer/mounting/ShadowViewMutation.h>
 #include <vector>

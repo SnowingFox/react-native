@@ -7,11 +7,12 @@
 
 #import "RCTJavaScriptLoader.h"
 
+#import <errno.h>
+#import <string.h>
 #import <sys/stat.h>
 
 #import <cxxreact/JSBundleType.h>
 
-#import "RCTBridge.h"
 #import "RCTConvert.h"
 #import "RCTMultipartDataTask.h"
 #import "RCTPerformanceLogger.h"
@@ -138,12 +139,20 @@ RCT_NOT_IMPLEMENTED(-(instancetype)init)
   // modules into JSC as they're required.
   FILE *bundle = fopen(scriptURL.path.UTF8String, "r");
   if (!bundle) {
+    // Read errno before anything else can clobber it. Without it a missing bundle (ENOENT) is
+    // indistinguishable from one that exists but cannot be read (EACCES, EIO), which is the
+    // difference between a packaging bug and a transient filesystem failure.
+    const int openErrno = errno;
     if (error) {
       *error = [NSError
           errorWithDomain:RCTJavaScriptLoaderErrorDomain
                      code:RCTJavaScriptLoaderErrorFailedOpeningFile
                  userInfo:@{
-                   NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Error opening bundle %@", scriptURL.path]
+                   NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Error opening bundle %@ (errno %d: %s)",
+                                                                          scriptURL.path,
+                                                                          openErrno,
+                                                                          strerror(openErrno)],
+                   NSUnderlyingErrorKey : [NSError errorWithDomain:NSPOSIXErrorDomain code:openErrno userInfo:nil]
                  }];
     }
     return nil;
@@ -190,12 +199,17 @@ RCT_NOT_IMPLEMENTED(-(instancetype)init)
 
   struct stat statInfo;
   if (stat(scriptURL.path.UTF8String, &statInfo) != 0) {
+    const int statErrno = errno;
     if (error) {
       *error = [NSError
           errorWithDomain:RCTJavaScriptLoaderErrorDomain
                      code:RCTJavaScriptLoaderErrorFailedStatingFile
                  userInfo:@{
-                   NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Error stating bundle %@", scriptURL.path]
+                   NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Error stating bundle %@ (errno %d: %s)",
+                                                                          scriptURL.path,
+                                                                          statErrno,
+                                                                          strerror(statErrno)],
+                   NSUnderlyingErrorKey : [NSError errorWithDomain:NSPOSIXErrorDomain code:statErrno userInfo:nil]
                  }];
     }
     return nil;
@@ -257,7 +271,7 @@ static void attemptAsynchronousLoadOfBundleAtURL(
                              [@"Could not connect to development server.\n\n"
                                "Ensure the following:\n"
                                "- Node server is running and available on the same network - run 'npm start' from react-native root\n"
-                               "- Node server URL is correctly set in AppDelegate\n"
+                               "- Node server URL is correctly set in your AppDelegate or SceneDelegate factory delegate\n"
                                "- WiFi is enabled and connected to the same network as the Node Server\n\n"
                                "URL: " stringByAppendingString:scriptURL.absoluteString],
                          NSLocalizedFailureReasonErrorKey : error.localizedDescription,

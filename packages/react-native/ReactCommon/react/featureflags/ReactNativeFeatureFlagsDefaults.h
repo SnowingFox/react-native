@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @generated SignedSource<<9809c179e61abe55f544d6c8227a5c01>>
+ * @generated SignedSource<<4f15eee24d8380b5d0cc9f726ad3a371>>
  */
 
 /**
@@ -18,6 +18,8 @@
  */
 
 #pragma once
+
+#include <react/cxxstableapi/PrivateGuard.h>
 
 #include <react/featureflags/ReactNativeFeatureFlagsProvider.h>
 
@@ -43,7 +45,19 @@ class ReactNativeFeatureFlagsDefaults : public ReactNativeFeatureFlagsProvider {
     return true;
   }
 
+  bool deferTextInputTruncationIOS() override {
+    return false;
+  }
+
   bool disableEarlyViewCommandExecution() override {
+    return false;
+  }
+
+  bool disableIdleEventDispatchFrameCallbackRearmAndroid() override {
+    return false;
+  }
+
+  bool disableIdleMountItemFrameCallbackRearmAndroid() override {
     return false;
   }
 
@@ -75,11 +89,15 @@ class ReactNativeFeatureFlagsDefaults : public ReactNativeFeatureFlagsProvider {
     return false;
   }
 
-  bool enableAndroidFontWeightAdjustment() override {
-    return true;
+  bool enableAndroidAutoOffscreenCompositingForElevation() override {
+    return false;
   }
 
   bool enableAndroidTextMeasurementOptimizations() override {
+    return true;
+  }
+
+  bool enableAsyncDiskCacheCheckInMultiSourceImageAndroid() override {
     return false;
   }
 
@@ -115,11 +133,19 @@ class ReactNativeFeatureFlagsDefaults : public ReactNativeFeatureFlagsProvider {
     return false;
   }
 
+  bool enableFabricCommitBranchingMergeOnMainThread() override {
+    return false;
+  }
+
   bool enableFabricLogs() override {
     return false;
   }
 
   bool enableFlexboxAutoMinSizeInStrictMode() override {
+    return false;
+  }
+
+  bool enableFollowUpMountItemDispatchAndroid() override {
     return false;
   }
 
@@ -148,6 +174,10 @@ class ReactNativeFeatureFlagsDefaults : public ReactNativeFeatureFlagsProvider {
   }
 
   bool enableImmediateUpdateModeForContentOffsetChanges() override {
+    return false;
+  }
+
+  bool enableImperativeEvents() override {
     return false;
   }
 
@@ -191,19 +221,19 @@ class ReactNativeFeatureFlagsDefaults : public ReactNativeFeatureFlagsProvider {
     return false;
   }
 
-  bool enablePreparedTextLayout() override {
+  bool enablePreallocatedPropsDiffOnInsertAndroid() override {
     return false;
+  }
+
+  bool enablePreparedTextLayout() override {
+    return true;
   }
 
   bool enablePropsUpdateReconciliationAndroid() override {
     return false;
   }
 
-  bool enableRuntimeSchedulerQueueClearingOnError() override {
-    return false;
-  }
-
-  bool enableSchedulerDelegateInvalidation() override {
+  bool enableResizeObserverByDefault() override {
     return false;
   }
 
@@ -239,11 +269,15 @@ class ReactNativeFeatureFlagsDefaults : public ReactNativeFeatureFlagsProvider {
     return false;
   }
 
-  bool fixDifferentiatorParentTagForUnflattenCase() override {
-    return true;
+  bool fixBorderlessRippleAndroid() override {
+    return false;
   }
 
   bool fixMappingOfEventPrioritiesBetweenFabricAndReact() override {
+    return false;
+  }
+
+  bool fixTextLayoutOnPixelDensityChange() override {
     return false;
   }
 
@@ -271,6 +305,10 @@ class ReactNativeFeatureFlagsDefaults : public ReactNativeFeatureFlagsProvider {
     return false;
   }
 
+  bool keepTimersRunningWhileHostPausedAndroid() override {
+    return false;
+  }
+
   bool optimizedAnimatedPropUpdates() override {
     return false;
   }
@@ -288,7 +326,7 @@ class ReactNativeFeatureFlagsDefaults : public ReactNativeFeatureFlagsProvider {
   }
 
   double preparedTextCacheSize() override {
-    return 200.0;
+    return 1000.0;
   }
 
   bool preventShadowTreeCommitExhaustion() override {
@@ -312,6 +350,10 @@ class ReactNativeFeatureFlagsDefaults : public ReactNativeFeatureFlagsProvider {
   }
 
   bool skipActivityIdentityAssertionOnHostPause() override {
+    return false;
+  }
+
+  bool skipUnchangedChildrenInDifferentiator() override {
     return false;
   }
 
@@ -356,6 +398,10 @@ class ReactNativeFeatureFlagsDefaults : public ReactNativeFeatureFlagsProvider {
   }
 
   bool useTurboModuleInterop() override {
+    return false;
+  }
+
+  bool useWindowDensityForDisplayMetricsAndroid() override {
     return false;
   }
 

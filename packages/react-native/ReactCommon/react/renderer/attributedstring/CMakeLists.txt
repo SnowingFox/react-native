@@ -17,9 +17,11 @@ target_link_libraries(react_renderer_attributedstring
         folly_runtime
         glog
         glog_init
+        react_cxxstableapi
         react_debug
         rrc_view
         react_renderer_core
+        react_renderer_css
         react_renderer_debug
         react_renderer_graphics
         react_renderer_mapbuffer

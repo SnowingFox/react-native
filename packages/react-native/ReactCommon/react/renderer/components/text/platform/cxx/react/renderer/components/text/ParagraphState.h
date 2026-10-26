@@ -7,7 +7,10 @@
 
 #pragma once
 
-#include <react/debug/react_native_assert.h>
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/Debug.h>
+#include <React/Graphics.h>
 #include <react/renderer/attributedstring/AttributedString.h>
 #include <react/renderer/attributedstring/ParagraphAttributes.h>
 #include <react/renderer/textlayoutmanager/TextLayoutManager.h>
@@ -37,6 +40,14 @@ class ParagraphState final {
    * `AttributedString`.
    */
   std::weak_ptr<const TextLayoutManager> layoutManager;
+
+  /*
+   * Size of the content frame that the paragraph was laid out with.
+   * The mounted view can temporarily have a different size (e.g. while
+   * LayoutAnimation interpolates its frame), so it lays out text in this size
+   * to keep line breaks stable.
+   */
+  Size layoutSize;
 };
 
 } // namespace facebook::react

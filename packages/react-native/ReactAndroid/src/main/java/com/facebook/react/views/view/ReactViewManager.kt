@@ -46,18 +46,19 @@ public open class ReactViewManager : ReactClippingViewManager<ReactViewGroup>() 
   public companion object {
     public const val REACT_CLASS: String = ViewProps.VIEW_CLASS_NAME
 
-    private val SPACING_TYPES = intArrayOf(
-        Spacing.ALL,
-        Spacing.LEFT,
-        Spacing.RIGHT,
-        Spacing.TOP,
-        Spacing.BOTTOM,
-        Spacing.START,
-        Spacing.END,
-        Spacing.BLOCK,
-        Spacing.BLOCK_END,
-        Spacing.BLOCK_START,
-    )
+    private val SPACING_TYPES =
+        intArrayOf(
+            Spacing.ALL,
+            Spacing.LEFT,
+            Spacing.RIGHT,
+            Spacing.TOP,
+            Spacing.BOTTOM,
+            Spacing.START,
+            Spacing.END,
+            Spacing.BLOCK,
+            Spacing.BLOCK_END,
+            Spacing.BLOCK_START,
+        )
     private const val CMD_HOTSPOT_UPDATE = 1
     private const val CMD_SET_PRESSED = 2
     private const val HOTSPOT_UPDATE_KEY = "hotspotUpdate"
@@ -123,14 +124,16 @@ public open class ReactViewManager : ReactClippingViewManager<ReactViewGroup>() 
     view.axOrderList = axOrderList
   }
 
-  @ReactProp(name = "hasTVPreferredFocus")
-  public open fun setTVPreferredFocus(view: ReactViewGroup, hasTVPreferredFocus: Boolean) {
-    if (hasTVPreferredFocus) {
-      view.isFocusable = true
-      view.isFocusableInTouchMode = true
-      view.requestFocus()
-    }
-  }
+  /**
+   * Retained for binary compatibility with [ReactViewManager] subclasses.
+   *
+   * This method no longer registers a React prop or changes view focus.
+   */
+  @Deprecated("Use focusable or focus() instead")
+  public open fun setTVPreferredFocus(
+      view: ReactViewGroup,
+      hasTVPreferredFocus: Boolean,
+  ): Unit = Unit
 
   @ReactProp(name = ViewProps.BACKGROUND_IMAGE, customType = "BackgroundImage")
   public open fun setBackgroundImage(view: ReactViewGroup, backgroundImage: ReadableArray?) {
@@ -174,6 +177,18 @@ public open class ReactViewManager : ReactClippingViewManager<ReactViewGroup>() 
     }
   }
 
+  @Deprecated(
+      "Use setBackgroundSize instead.",
+      ReplaceWith("setBackgroundSize(view, backgroundSize)"),
+  )
+  @ReactProp(name = ViewProps.EXPERIMENTAL_BACKGROUND_SIZE, customType = "BackgroundSize")
+  public open fun setExperimentalBackgroundSize(
+      view: ReactViewGroup,
+      backgroundSize: ReadableArray?,
+  ) {
+    setBackgroundSize(view, backgroundSize)
+  }
+
   @ReactProp(name = ViewProps.BACKGROUND_POSITION, customType = "BackgroundPosition")
   public open fun setBackgroundPosition(view: ReactViewGroup, backgroundPosition: ReadableArray?) {
     if (backgroundPosition != null && backgroundPosition.size() > 0) {
@@ -191,6 +206,18 @@ public open class ReactViewManager : ReactClippingViewManager<ReactViewGroup>() 
     }
   }
 
+  @Deprecated(
+      "Use setBackgroundPosition instead.",
+      ReplaceWith("setBackgroundPosition(view, backgroundPosition)"),
+  )
+  @ReactProp(name = ViewProps.EXPERIMENTAL_BACKGROUND_POSITION, customType = "BackgroundPosition")
+  public open fun setExperimentalBackgroundPosition(
+      view: ReactViewGroup,
+      backgroundPosition: ReadableArray?,
+  ) {
+    setBackgroundPosition(view, backgroundPosition)
+  }
+
   @ReactProp(name = ViewProps.BACKGROUND_REPEAT, customType = "BackgroundRepeat")
   public open fun setBackgroundRepeat(view: ReactViewGroup, backgroundRepeat: ReadableArray?) {
     if (backgroundRepeat != null && backgroundRepeat.size() > 0) {
@@ -206,6 +233,18 @@ public open class ReactViewManager : ReactClippingViewManager<ReactViewGroup>() 
     } else {
       BackgroundStyleApplicator.setBackgroundRepeat(view, null)
     }
+  }
+
+  @Deprecated(
+      "Use setBackgroundRepeat instead.",
+      ReplaceWith("setBackgroundRepeat(view, backgroundRepeat)"),
+  )
+  @ReactProp(name = ViewProps.EXPERIMENTAL_BACKGROUND_REPEAT, customType = "BackgroundRepeat")
+  public open fun setExperimentalBackgroundRepeat(
+      view: ReactViewGroup,
+      backgroundRepeat: ReadableArray?,
+  ) {
+    setBackgroundRepeat(view, backgroundRepeat)
   }
 
   @ReactProp(name = "nextFocusDown", defaultInt = View.NO_ID)

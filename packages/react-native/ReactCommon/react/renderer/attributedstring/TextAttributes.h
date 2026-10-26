@@ -7,21 +7,20 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <functional>
 #include <limits>
 #include <optional>
 #include <vector>
 
+#include <React/Graphics.h>
+#include <React/RendererCore.h>
+#include <React/RendererDebug.h>
+#include <React/Utils.h>
+#include <React/View.h>
 #include <folly/dynamic.h>
 #include <react/renderer/attributedstring/primitives.h>
-#include <react/renderer/components/view/AccessibilityPrimitives.h>
-#include <react/renderer/core/LayoutPrimitives.h>
-#include <react/renderer/core/ReactPrimitives.h>
-#include <react/renderer/debug/DebugStringConvertible.h>
-#include <react/renderer/graphics/Color.h>
-#include <react/renderer/graphics/Float.h>
-#include <react/renderer/graphics/Size.h>
-#include <react/utils/hash_combine.h>
 
 namespace facebook::react {
 
@@ -52,17 +51,20 @@ class TextAttributes : public DebugStringConvertible {
   Float opacity{std::numeric_limits<Float>::quiet_NaN()};
 
   // Font
+  // We list 4-byte fields first to mitigate alignment gaps created by smaller
+  // values. Keep these fields in sync with TextAttributesLayoutTest, which
+  // checks alignment.
   std::string fontFamily{""};
   Float fontSize{std::numeric_limits<Float>::quiet_NaN()};
   Float fontSizeMultiplier{std::numeric_limits<Float>::quiet_NaN()};
-  std::optional<FontWeight> fontWeight{};
-  std::optional<FontStyle> fontStyle{};
+  Float maxFontSizeMultiplier{std::numeric_limits<Float>::quiet_NaN()};
+  Float letterSpacing{std::numeric_limits<Float>::quiet_NaN()};
   std::optional<FontVariant> fontVariant{};
   std::optional<std::string> fontVariationSettings{};
+  std::optional<FontWeight> fontWeight{};
+  std::optional<FontStyle> fontStyle{};
   std::optional<bool> allowFontScaling{};
-  Float maxFontSizeMultiplier{std::numeric_limits<Float>::quiet_NaN()};
   std::optional<DynamicTypeRamp> dynamicTypeRamp{};
-  Float letterSpacing{std::numeric_limits<Float>::quiet_NaN()};
   std::optional<TextTransform> textTransform{};
 
   // Paragraph Styles
@@ -133,7 +135,11 @@ struct hash<facebook::react::TextAttributes> {
     for (const auto &effect : textAttributes.textEffects) {
       facebook::react::hash_combine(textEffectsHash, effect);
     }
-    return facebook::react::hash_combine(
+    // The optionals are folded into one presence mask rather than being chained individually, so
+    // that the properties a given text run does not set stay off the hash's dependency chain.
+    size_t seed = 0;
+    facebook::react::hash_combine(
+        seed,
         textAttributes.foregroundColor,
         textAttributes.backgroundColor,
         textAttributes.opacity,
@@ -141,30 +147,33 @@ struct hash<facebook::react::TextAttributes> {
         textAttributes.fontSize,
         textAttributes.maxFontSizeMultiplier,
         textAttributes.fontSizeMultiplier,
+        textAttributes.letterSpacing,
+        textAttributes.lineHeight,
+        textAttributes.textShadowRadius,
+        textAttributes.textDecorationColor,
+        textAttributes.textShadowColor,
+        textEffectsHash);
+    facebook::react::hash_combine_optionals(
+        seed,
         textAttributes.fontWeight,
         textAttributes.fontStyle,
         textAttributes.fontVariant,
         textAttributes.fontVariationSettings,
         textAttributes.allowFontScaling,
-        textAttributes.letterSpacing,
         textAttributes.textTransform,
-        textAttributes.lineHeight,
         textAttributes.alignment,
         textAttributes.baseWritingDirection,
         textAttributes.lineBreakStrategy,
         textAttributes.lineBreakMode,
-        textAttributes.textDecorationColor,
         textAttributes.textDecorationLineType,
         textAttributes.textDecorationStyle,
         textAttributes.textShadowOffset,
-        textAttributes.textShadowRadius,
-        textAttributes.textShadowColor,
         textAttributes.isHighlighted,
         textAttributes.isPressable,
         textAttributes.layoutDirection,
         textAttributes.accessibilityRole,
-        textAttributes.role,
-        textEffectsHash);
+        textAttributes.role);
+    return seed;
   }
 };
 } // namespace std

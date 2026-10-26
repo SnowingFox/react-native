@@ -7,10 +7,11 @@
 
 #include <gtest/gtest.h>
 #include <react/renderer/attributedstring/ParagraphAttributes.h>
+#include <react/renderer/attributedstring/conversions.h>
 
 namespace facebook::react {
 
-// The three Float fields default to NaN, and NaN != NaN under IEEE-754.
+// The two Float fields default to NaN, and NaN != NaN under IEEE-754.
 // operator== must special-case NaN via floatEquality so two freshly
 // default-constructed ParagraphAttributes compare equal.
 TEST(
@@ -30,12 +31,10 @@ TEST(
     testOperatorEqualsFloatFieldsUseEpsilonComparison) {
   ParagraphAttributes a{};
   a.minimumFontSize = 12.0f;
-  a.maximumFontSize = 48.0f;
   a.minimumFontScale = 0.5f;
   auto b = a;
 
   b.minimumFontSize = a.minimumFontSize + 0.001f;
-  b.maximumFontSize = a.maximumFontSize + 0.001f;
   b.minimumFontScale = a.minimumFontScale + 0.001f;
   EXPECT_TRUE(a == b);
 
@@ -45,8 +44,8 @@ TEST(
 }
 
 // floatEquality returns true only when *both* operands are NaN or when
-// *neither* is. A NaN-vs-finite mismatch in any of the three float fields
-// must therefore make the instances unequal, even though both operands are
+// *neither* is. A NaN-vs-finite mismatch in either float field must
+// therefore make the instances unequal, even though both operands are
 // "invalid" font sizes.
 TEST(
     ParagraphAttributesTest,
@@ -56,6 +55,18 @@ TEST(
   withFinite.minimumFontSize = 12.0f;
 
   EXPECT_FALSE(withNaN == withFinite);
+}
+
+// minimumFontScale defaults to NaN, meaning "unset"; an instance with a scale
+// must compare unequal to one without.
+TEST(
+    ParagraphAttributesTest,
+    testOperatorEqualsNaNVsFiniteMinimumFontScaleComparesUnequal) {
+  ParagraphAttributes unset{};
+  ParagraphAttributes withScale{};
+  withScale.minimumFontScale = 0.5f;
+
+  EXPECT_FALSE(unset == withScale);
 }
 
 // textAlignVertical is a std::optional; operator== must treat "unset" and
@@ -68,6 +79,52 @@ TEST(
   set.textAlignVertical = TextAlignmentVertical::Auto;
 
   EXPECT_FALSE(unset == set);
+}
+
+TEST(ParagraphAttributesTest, testOperatorEqualsIncludesTextWidthMode) {
+  ParagraphAttributes autoWidth{};
+  ParagraphAttributes longestLineWidth{};
+  longestLineWidth.textWidthMode = TextWidthMode::LongestLine;
+
+  EXPECT_FALSE(autoWidth == longestLineWidth);
+}
+
+TEST(ParagraphAttributesTest, testAutoTextWidthModeSerializesAsAuto) {
+  EXPECT_EQ(toString(TextWidthMode::Auto), "auto");
+}
+
+TEST(ParagraphAttributesTest, testOperatorEqualsIncludesLineBreakAndWordBreak) {
+  ParagraphAttributes defaults{};
+  ParagraphAttributes strict{};
+  strict.lineBreak = LineBreak::Strict;
+  ParagraphAttributes phrase{};
+  phrase.wordBreak = WordBreak::AutoPhrase;
+
+  EXPECT_FALSE(defaults == strict);
+  EXPECT_FALSE(defaults == phrase);
+  EXPECT_NE(
+      std::hash<ParagraphAttributes>{}(defaults),
+      std::hash<ParagraphAttributes>{}(strict));
+}
+
+TEST(
+    ParagraphAttributesTest,
+    testLineBreakAndWordBreakDefaultToCssInitialValues) {
+  ParagraphAttributes defaults{};
+
+  EXPECT_EQ(defaults.lineBreak, LineBreak::Auto);
+  EXPECT_EQ(defaults.wordBreak, WordBreak::Normal);
+}
+
+// The Android TextLayoutManager parses these strings, so they must match the
+// values accepted from JavaScript.
+TEST(ParagraphAttributesTest, testLineBreakAndWordBreakSerializeToPropValues) {
+  EXPECT_EQ(toString(LineBreak::Auto), "auto");
+  EXPECT_EQ(toString(LineBreak::Loose), "loose");
+  EXPECT_EQ(toString(LineBreak::Normal), "normal");
+  EXPECT_EQ(toString(LineBreak::Strict), "strict");
+  EXPECT_EQ(toString(WordBreak::Normal), "normal");
+  EXPECT_EQ(toString(WordBreak::AutoPhrase), "auto-phrase");
 }
 
 } // namespace facebook::react

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include "ConsoleMessage.h"
 #include "EnumArray.h"
 #include "ExecutionContext.h"
@@ -16,7 +18,7 @@
 #include "StackTrace.h"
 #include "WeakList.h"
 
-#include <ReactCommon/RuntimeExecutor.h>
+#include <React/RuntimeExecutor.h>
 #include <jsinspector-modern/tracing/RuntimeSamplingProfile.h>
 #include <jsinspector-modern/tracing/TraceRecordingState.h>
 

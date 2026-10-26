@@ -12,17 +12,21 @@
 
 const {
   detectStandardRnLayoutRedirect,
+  determineVersion,
   ensureBothArtifactFlavors,
   findInjectedXcodeproj,
   generateAutolinkingConfigOrFailClosed,
   parseArgs,
   resolveAction,
+  resolveAppIosDeploymentTarget,
   resolveConfigCommandToPin,
+  resolveCxxApiDefines,
   resolveExplicitConfigCommand,
   shouldAutoDeintegrate,
 } = require('../../setup-apple-spm');
 const {REQUIRED_ARTIFACTS} = require('../download-spm-artifacts');
 const {SPM_INJECTED_MARKER} = require('../generate-spm-xcodeproj');
+const {twoAppTargets} = require('./pbxproj-variants');
 const {execFileSync} = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -171,6 +175,60 @@ describe('generateAutolinkingConfigOrFailClosed', () => {
 // → the built-in default. undefined means "let generateAutolinkingConfig pick
 // the env var or the default".
 // ---------------------------------------------------------------------------
+
+describe('resolveCxxApiDefines', () => {
+  const ENV_VARS = ['RN_STRICT_API', 'RN_ALLOW_FRAMEWORKS'];
+  let tempDir;
+  let prevEnv;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-cxx-api-'));
+    prevEnv = ENV_VARS.map(name => process.env[name]);
+    ENV_VARS.forEach(name => delete process.env[name]);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, {recursive: true, force: true});
+    ENV_VARS.forEach((name, i) => {
+      if (prevEnv[i] === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = prevEnv[i];
+      }
+    });
+  });
+
+  it('defines, on add/update, each opt-in whose env var is 1, whatever was recorded', () => {
+    mkInjectedXcodeproj(tempDir, 'MyApp.xcodeproj', {
+      cxxApiDefines: ['RN_STRICT_API', 'RN_ALLOW_FRAMEWORKS'],
+    });
+    process.env.RN_STRICT_API = '1';
+    process.env.RN_ALLOW_FRAMEWORKS = 'true';
+    expect(resolveCxxApiDefines('add', tempDir)).toEqual(['RN_STRICT_API']);
+    delete process.env.RN_STRICT_API;
+    process.env.RN_ALLOW_FRAMEWORKS = '1';
+    expect(resolveCxxApiDefines('update', tempDir)).toEqual([
+      'RN_ALLOW_FRAMEWORKS',
+    ]);
+  });
+
+  it('reuses the recorded macros on sync/codegen, which Xcode runs without the shell env', () => {
+    mkInjectedXcodeproj(tempDir, 'MyApp.xcodeproj', {
+      cxxApiDefines: ['RN_ALLOW_FRAMEWORKS', 'NOT_A_CXX_API_MACRO'],
+    });
+    process.env.RN_STRICT_API = '1';
+    expect(resolveCxxApiDefines('sync', tempDir)).toEqual([
+      'RN_ALLOW_FRAMEWORKS',
+    ]);
+    expect(resolveCxxApiDefines('codegen', tempDir)).toEqual([
+      'RN_ALLOW_FRAMEWORKS',
+    ]);
+  });
+
+  it('defines nothing on sync before anything is injected', () => {
+    expect(resolveCxxApiDefines('sync', tempDir)).toEqual([]);
+  });
+});
 
 describe('resolveExplicitConfigCommand', () => {
   const ENV = 'RCT_SPM_AUTOLINKING_CONFIG_COMMAND';
@@ -559,5 +617,141 @@ describe('shouldAutoDeintegrate', () => {
     // conversion only touches the pbxproj + Podfile, which stay clean.
     fs.writeFileSync(path.join(tempDir, 'package-lock.json'), '{}');
     expect(shouldAutoDeintegrate(tempDir, xcodeproj)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// determineVersion — which RN version the artifact slots are wired to:
+// explicit --version → the `artifactsVersionOverride` pinned in the injection
+// marker by a previous `--version` → node_modules/react-native/package.json.
+// ---------------------------------------------------------------------------
+
+describe('determineVersion', () => {
+  let appRoot;
+  let reactNativeRoot;
+  let logSpy;
+
+  beforeEach(() => {
+    appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-version-app-'));
+    reactNativeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-version-rn-'));
+    fs.writeFileSync(
+      path.join(reactNativeRoot, 'package.json'),
+      JSON.stringify({name: 'react-native', version: '1000.0.0'}),
+    );
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    fs.rmSync(appRoot, {recursive: true, force: true});
+    fs.rmSync(reactNativeRoot, {recursive: true, force: true});
+  });
+
+  const logged = () => logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+
+  it('prefers an explicit --version over a pinned override', () => {
+    mkInjectedXcodeproj(appRoot, 'MyApp.xcodeproj', {
+      artifactsVersionOverride: '0.80.0',
+    });
+
+    expect(
+      determineVersion({version: '0.81.0'}, reactNativeRoot, appRoot),
+    ).toBe('0.81.0');
+    expect(logged()).not.toMatch(/spm-injected\.json/);
+  });
+
+  it('uses the pinned override when --version is omitted', () => {
+    mkInjectedXcodeproj(appRoot, 'MyApp.xcodeproj', {
+      artifactsVersionOverride: '0.80.0',
+    });
+
+    expect(determineVersion({version: null}, reactNativeRoot, appRoot)).toBe(
+      '0.80.0',
+    );
+  });
+
+  it('names the marker in the log when the pin is the source', () => {
+    mkInjectedXcodeproj(appRoot, 'MyApp.xcodeproj', {
+      artifactsVersionOverride: '0.80.0',
+    });
+    determineVersion({version: null}, reactNativeRoot, appRoot);
+
+    expect(logged()).toMatch(/0\.80\.0/);
+    expect(logged()).toMatch(/spm-injected\.json/);
+  });
+
+  it("falls back to react-native's package.json with no pin recorded", () => {
+    mkInjectedXcodeproj(appRoot, 'MyApp.xcodeproj');
+
+    expect(determineVersion({version: null}, reactNativeRoot, appRoot)).toBe(
+      '1000.0.0',
+    );
+    expect(logged()).not.toMatch(/spm-injected\.json/);
+  });
+
+  it("falls back to react-native's package.json when no project is injected", () => {
+    mkXcodeproj(appRoot, 'MyApp.xcodeproj');
+
+    expect(determineVersion({version: null}, reactNativeRoot, appRoot)).toBe(
+      '1000.0.0',
+    );
+  });
+
+  it('falls back without throwing when the marker is corrupt', () => {
+    const xcodeproj = path.join(appRoot, 'MyApp.xcodeproj');
+    fs.mkdirSync(xcodeproj, {recursive: true});
+    fs.writeFileSync(path.join(xcodeproj, SPM_INJECTED_MARKER), '{not json');
+
+    expect(determineVersion({version: null}, reactNativeRoot, appRoot)).toBe(
+      '1000.0.0',
+    );
+  });
+});
+
+describe('resolveAppIosDeploymentTarget', () => {
+  let appRoot;
+  let logSpy;
+
+  beforeEach(() => {
+    appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-setup-iosdt-'));
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    fs.rmSync(appRoot, {recursive: true, force: true});
+  });
+
+  function logged() {
+    return logSpy.mock.calls.map(call => call.join(' ')).join('\n');
+  }
+
+  // No marker — the first `spm add`, where only --product-name identifies the
+  // target among the fixture's two app targets.
+  function mkTwoTargetProject() {
+    const dir = path.join(appRoot, 'MyApp.xcodeproj');
+    fs.mkdirSync(dir, {recursive: true});
+    fs.writeFileSync(
+      path.join(dir, 'project.pbxproj'),
+      twoAppTargets('16.4'),
+      'utf8',
+    );
+  }
+
+  it('reads the app target --product-name selects, not the lowest one', () => {
+    mkTwoTargetProject();
+    expect(resolveAppIosDeploymentTarget({productName: 'MyApp'}, appRoot)).toBe(
+      '16.4',
+    );
+    expect(logged()).toContain(
+      'iOS deployment target: 16.4 (from MyApp.xcodeproj)',
+    );
+  });
+
+  it('names the reason alongside the default when no project could be picked', () => {
+    expect(resolveAppIosDeploymentTarget({}, appRoot)).toBe('15.1');
+    expect(logged()).toContain(
+      'iOS deployment target: 15.1 (react-native default; no .xcodeproj found',
+    );
   });
 });

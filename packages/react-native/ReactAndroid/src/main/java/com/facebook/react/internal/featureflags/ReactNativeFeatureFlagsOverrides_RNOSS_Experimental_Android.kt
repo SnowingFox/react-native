@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @generated SignedSource<<41f83a9921de88f659ddc22172344226>>
+ * @generated SignedSource<<c5daa3cf1c88507ccb625ba7367dfcaf>>
  */
 
 /**
@@ -23,13 +23,11 @@ public open class ReactNativeFeatureFlagsOverrides_RNOSS_Experimental_Android : 
   // We could use JNI to get the defaults from C++,
   // but that is more expensive than just duplicating the defaults here.
 
+  override fun disableIdleEventDispatchFrameCallbackRearmAndroid(): Boolean = true
+
+  override fun disableIdleMountItemFrameCallbackRearmAndroid(): Boolean = true
+
   override fun enableFlexboxAutoMinSizeInStrictMode(): Boolean = true
-
-  override fun enableRuntimeSchedulerQueueClearingOnError(): Boolean = true
-
-  override fun enableSchedulerDelegateInvalidation(): Boolean = true
-
-  override fun fuseboxFrameRecordingEnabled(): Boolean = true
 
   override fun preventShadowTreeCommitExhaustion(): Boolean = true
 

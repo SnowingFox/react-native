@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @generated SignedSource<<497c1f334f6b3325e032e09947f6fce4>>
+ * @generated SignedSource<<dfa41f479803f71200142269d679b3a1>>
  */
 
 /**
@@ -112,19 +112,19 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
   override var lastScrollDispatchTime: Long = 0L
   override var hasChildPressedStateDelay: Boolean? = null
 
-  public open var pointerEvents: PointerEvents = PointerEvents.AUTO
+  open var pointerEvents: PointerEvents = PointerEvents.AUTO
     set(value) {
       field = value
       ImportantForInteractionHelper.setImportantForInteraction(this, value, _overflow)
     }
 
-  public open var fadingEdgeLengthStart: Int = 0
+  open var fadingEdgeLengthStart: Int = 0
     set(value) {
       field = value
       invalidate()
     }
 
-  public open var fadingEdgeLengthEnd: Int = 0
+  open var fadingEdgeLengthEnd: Int = 0
     set(value) {
       field = value
       invalidate()
@@ -322,58 +322,58 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
     }
   }
 
-  public open fun setDisableIntervalMomentum(disableIntervalMomentum: Boolean) {
+  open fun setDisableIntervalMomentum(disableIntervalMomentum: Boolean) {
     this.disableIntervalMomentum = disableIntervalMomentum
   }
 
-  public open fun setSendMomentumEvents(sendMomentumEvents: Boolean) {
+  open fun setSendMomentumEvents(sendMomentumEvents: Boolean) {
     this.sendMomentumEvents = sendMomentumEvents
   }
 
-  public open fun setScrollPerfTag(scrollPerfTag: String?) {
+  open fun setScrollPerfTag(scrollPerfTag: String?) {
     this.scrollPerfTag = scrollPerfTag
   }
 
-  public open fun setPagingEnabled(pagingEnabled: Boolean) {
+  open fun setPagingEnabled(pagingEnabled: Boolean) {
     this.pagingEnabled = pagingEnabled
   }
 
-  public open fun setScrollsChildToFocus(scrollsChildToFocus: Boolean) {
+  open fun setScrollsChildToFocus(scrollsChildToFocus: Boolean) {
     this.scrollsChildToFocus = scrollsChildToFocus
   }
 
-  public open fun setDecelerationRate(decelerationRate: Float) {
+  open fun setDecelerationRate(decelerationRate: Float) {
     reactScrollViewScrollState.decelerationRate = decelerationRate
     scroller?.setFriction(1.0f - decelerationRate)
   }
 
-  public open fun abortAnimation() {
+  open fun abortAnimation() {
     if (scroller != null && !scroller.isFinished) {
       scroller.abortAnimation()
     }
   }
 
-  public open fun setSnapInterval(snapInterval: Int) {
+  open fun setSnapInterval(snapInterval: Int) {
     this.snapInterval = snapInterval
   }
 
-  public open fun setSnapOffsets(snapOffsets: List<Int>?) {
+  open fun setSnapOffsets(snapOffsets: List<Int>?) {
     this.snapOffsets = snapOffsets
   }
 
-  public open fun setSnapToStart(snapToStart: Boolean) {
+  open fun setSnapToStart(snapToStart: Boolean) {
     this.snapToStart = snapToStart
   }
 
-  public open fun setSnapToEnd(snapToEnd: Boolean) {
+  open fun setSnapToEnd(snapToEnd: Boolean) {
     this.snapToEnd = snapToEnd
   }
 
-  public open fun setSnapToAlignment(snapToAlignment: Int) {
+  open fun setSnapToAlignment(snapToAlignment: Int) {
     this.snapToAlignment = snapToAlignment
   }
 
-  public open fun flashScrollIndicators() {
+  open fun flashScrollIndicators() {
     awakenScrollBars()
   }
 
@@ -387,7 +387,7 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
     return fadingEdgeLengthEnd / max
   }
 
-  public open fun setOverflow(overflow: String?) {
+  open fun setOverflow(overflow: String?) {
     _overflow =
         if (overflow == null) {
           Overflow.SCROLL
@@ -598,7 +598,7 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
 
     velocityHelper.calculateVelocity(ev)
     val action = ev.actionMasked
-    if (action == MotionEvent.ACTION_UP && dragging) {
+    if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) && dragging) {
       ReactScrollViewHelper.updateFabricScrollState(this)
       val velocityX = velocityHelper.xVelocity
       val velocityY = velocityHelper.yVelocity
@@ -644,7 +644,7 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
           }
           postTouchRunnable = Runnable {
             postTouchRunnable = null
-            var velocityY = (-vScroll.sign).toInt()
+            var velocityY = (if (isVerticallyInverted()) vScroll.sign else -vScroll.sign).toInt()
             if (disableIntervalMomentum) {
               velocityY = 0
             }
@@ -660,6 +660,20 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
     }
 
     return super.dispatchGenericMotionEvent(ev)
+  }
+
+  override fun onGenericMotionEvent(ev: MotionEvent): Boolean {
+    if (ev.actionMasked != MotionEvent.ACTION_SCROLL || !isVerticallyInverted()) {
+      return super.onGenericMotionEvent(ev)
+    }
+    // Android maps pointer coordinates through view transforms but not scroll axis values, so wheel
+    // and joystick input would otherwise scroll a vertically inverted view backwards.
+    val invertedEvent = obtainWithInvertedVerticalScroll(ev)
+    return try {
+      super.onGenericMotionEvent(invertedEvent)
+    } finally {
+      invertedEvent.recycle()
+    }
   }
 
   override fun executeKeyEvent(event: KeyEvent): Boolean {
@@ -774,7 +788,7 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
     super.draw(canvas)
   }
 
-  public override fun onDraw(canvas: Canvas) {
+  override fun onDraw(canvas: Canvas) {
     if (_overflow != Overflow.VISIBLE) {
       BackgroundStyleApplicator.clipToPaddingBox(this, canvas)
     }
@@ -1073,7 +1087,7 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
 
   private fun getSnapInterval(): Int = if (snapInterval != 0) snapInterval else height
 
-  public open fun setEndFillColor(color: Int) {
+  open fun setEndFillColor(color: Int) {
     if (color != endFillColor) {
       endFillColor = color
       endBackground = ColorDrawable(endFillColor)
@@ -1114,7 +1128,7 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
     contentView = null
   }
 
-  public open fun setContentOffset(value: ReadableMap?) {
+  open fun setContentOffset(value: ReadableMap?) {
     if (currentContentOffset == null || currentContentOffset != value) {
       currentContentOffset = value
       if (value != null) {
@@ -1226,7 +1240,7 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
     BackgroundStyleApplicator.setBackgroundColor(this, color)
   }
 
-  public open fun setBorderWidth(position: Int, width: Float) {
+  open fun setBorderWidth(position: Int, width: Float) {
     BackgroundStyleApplicator.setBorderWidth(
         this,
         LogicalEdge.entries[position],
@@ -1234,22 +1248,22 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
     )
   }
 
-  public open fun setBorderColor(position: Int, color: Int?) {
+  open fun setBorderColor(position: Int, color: Int?) {
     BackgroundStyleApplicator.setBorderColor(this, LogicalEdge.entries[position], color)
   }
 
-  public open fun setBorderRadius(borderRadius: Float) {
+  open fun setBorderRadius(borderRadius: Float) {
     setBorderRadius(borderRadius, BorderRadiusProp.BORDER_RADIUS.ordinal)
   }
 
-  public open fun setBorderRadius(borderRadius: Float, position: Int) {
+  open fun setBorderRadius(borderRadius: Float, position: Int) {
     val radius =
         if (borderRadius.isNaN()) null
         else LengthPercentage(PixelUtil.toDIPFromPixel(borderRadius), LengthPercentageType.POINT)
     BackgroundStyleApplicator.setBorderRadius(this, BorderRadiusProp.entries[position], radius)
   }
 
-  public open fun setBorderStyle(style: String?) {
+  open fun setBorderStyle(style: String?) {
     BackgroundStyleApplicator.setBorderStyle(
         this,
         if (style == null) null else BorderStyle.fromString(style),
@@ -1269,11 +1283,11 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
    * that you are **not** overriding the NestedScrollView content view to pass in a `translateY` style.
    * `translateY` must never be set from ReactJS while using this feature!
    */
-  public open fun setScrollAwayPaddingEnabledUnstable(topPadding: Int, bottomPadding: Int) {
+  open fun setScrollAwayPaddingEnabledUnstable(topPadding: Int, bottomPadding: Int) {
     setScrollAwayPaddingEnabledUnstable(topPadding, bottomPadding, true)
   }
 
-  public open fun setScrollAwayPaddingEnabledUnstable(
+  open fun setScrollAwayPaddingEnabledUnstable(
       topPadding: Int,
       bottomPadding: Int,
       updateState: Boolean,
@@ -1321,4 +1335,46 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
 
   override fun getFlingExtrapolatedDistance(velocity: Int): Int =
       ReactScrollViewHelper.predictFinalScrollPosition(this, 0, velocity, 0, getMaxScrollY()).y
+}
+
+/** Whether transforms on this view or its ancestors flip it vertically on screen. */
+private fun View.isVerticallyInverted(): Boolean {
+  val down = floatArrayOf(0f, 1f)
+  var view: View? = this
+  while (view != null) {
+    view.matrix.mapVectors(down)
+    view = view.parent as? View
+  }
+  return down[1] < 0
+}
+
+/** Copies [event] with its vertical scroll axis negated. The caller must recycle the copy. */
+private fun obtainWithInvertedVerticalScroll(event: MotionEvent): MotionEvent {
+  val properties =
+      Array(event.pointerCount) { i ->
+        MotionEvent.PointerProperties().also { event.getPointerProperties(i, it) }
+      }
+  val coords =
+      Array(event.pointerCount) { i ->
+        MotionEvent.PointerCoords().apply {
+          event.getPointerCoords(i, this)
+          setAxisValue(MotionEvent.AXIS_VSCROLL, -getAxisValue(MotionEvent.AXIS_VSCROLL))
+        }
+      }
+  return MotionEvent.obtain(
+      event.downTime,
+      event.eventTime,
+      event.action,
+      event.pointerCount,
+      properties,
+      coords,
+      event.metaState,
+      event.buttonState,
+      event.xPrecision,
+      event.yPrecision,
+      event.deviceId,
+      event.edgeFlags,
+      event.source,
+      event.flags,
+  )
 }

@@ -28,6 +28,7 @@
 #import <React/RCTUtils.h>
 #import <ReactCommon/CxxTurboModuleUtils.h>
 #import <ReactCommon/RCTTurboModuleWithJSIBindings.h>
+#import <ReactCommon/TurboModuleBinding.h>
 #import <ReactCommon/TurboModulePerfLogger.h>
 
 using namespace facebook;
@@ -763,6 +764,10 @@ Class getFallbackClassFromName(const char *name)
   NSString *objcModuleName = [NSString stringWithUTF8String:moduleName];
   NSArray<Class> *modules = RCTGetModuleClasses();
   for (Class current in modules) {
+    // A class without +moduleName has no custom JS name, so it can never match here.
+    if (![current respondsToSelector:@selector(moduleName)]) {
+      continue;
+    }
     NSString *currentModuleName = [current moduleName];
     if ([objcModuleName isEqualToString:currentModuleName]) {
       return current;

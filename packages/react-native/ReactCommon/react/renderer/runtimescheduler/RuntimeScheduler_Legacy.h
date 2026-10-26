@@ -7,10 +7,11 @@
 
 #pragma once
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
 #ifndef RCT_REMOVE_LEGACY_ARCH
 
-#include <ReactCommon/RuntimeExecutor.h>
-#include <react/renderer/consistency/ShadowTreeRevisionConsistencyManager.h>
+#include <React/RuntimeExecutor.h>
 #include <react/renderer/runtimescheduler/RuntimeScheduler.h>
 #include <react/renderer/runtimescheduler/Task.h>
 #include <atomic>
@@ -18,6 +19,8 @@
 #include <queue>
 
 namespace facebook::react {
+
+class ShadowTreeRevisionConsistencyManager;
 
 class RuntimeScheduler_Legacy final : public RuntimeSchedulerBase {
  public:
@@ -132,6 +135,8 @@ class RuntimeScheduler_Legacy final : public RuntimeSchedulerBase {
 
   void setIntersectionObserverDelegate(
       RuntimeSchedulerIntersectionObserverDelegate *intersectionObserverDelegate) override;
+
+  void setResizeObserverDelegate(RuntimeSchedulerResizeObserverDelegate *resizeObserverDelegate) override;
 
  private:
   std::priority_queue<std::shared_ptr<Task>, std::vector<std::shared_ptr<Task>>, TaskPriorityComparer> taskQueue_;

@@ -13,6 +13,7 @@
 #include <react/renderer/core/graphicsConversions.h>
 #include <react/renderer/core/propsConversions.h>
 #include <react/renderer/debug/debugStringConvertibleUtils.h>
+#include <react/utils/FloatComparison.h>
 
 #include <glog/logging.h>
 
@@ -128,12 +129,6 @@ folly::dynamic HostPlatformParagraphProps::getDiffProps(
     result["minimumFontSize"] = paragraphAttributes.minimumFontSize;
   }
 
-  if (!floatEquality(
-          paragraphAttributes.maximumFontSize,
-          oldProps->paragraphAttributes.maximumFontSize)) {
-    result["maximumFontSize"] = paragraphAttributes.maximumFontSize;
-  }
-
   if (paragraphAttributes.includeFontPadding !=
       oldProps->paragraphAttributes.includeFontPadding) {
     result["includeFontPadding"] = paragraphAttributes.includeFontPadding;
@@ -143,6 +138,16 @@ folly::dynamic HostPlatformParagraphProps::getDiffProps(
       oldProps->paragraphAttributes.android_hyphenationFrequency) {
     result["android_hyphenationFrequency"] =
         toString(paragraphAttributes.android_hyphenationFrequency);
+  }
+
+  if (paragraphAttributes.lineBreak !=
+      oldProps->paragraphAttributes.lineBreak) {
+    result["lineBreak"] = toString(paragraphAttributes.lineBreak);
+  }
+
+  if (paragraphAttributes.wordBreak !=
+      oldProps->paragraphAttributes.wordBreak) {
+    result["wordBreak"] = toString(paragraphAttributes.wordBreak);
   }
 
   if (paragraphAttributes.textAlignVertical !=

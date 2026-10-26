@@ -11,6 +11,13 @@ import PackageDescription
 
 let BUILD_FROM_SOURCE = false
 
+// Removing the legacy TurboModule and component interop layers is opt-in while those
+// layers are still supported. Both will default to on in a future React Native release.
+let REMOVE_LEGACY_MODULE_INTEROP =
+  ProcessInfo.processInfo.environment["RCT_REMOVE_LEGACY_MODULE_INTEROP"] == "1"
+let REMOVE_LEGACY_COMPONENT_INTEROP =
+  ProcessInfo.processInfo.environment["RCT_REMOVE_LEGACY_COMPONENT_INTEROP"] == "1"
+
 /**
  This is the `Package.swift` file that allows to build React Native core using Swift PM.
  To build React Native, you need to follow these steps:
@@ -63,7 +70,10 @@ let rctDeprecation = RNTarget(
 let yoga = RNTarget(
   name: .yoga,
   path: "ReactCommon/yoga",
-  publicHeadersPath: "yoga"
+  excludedPaths: ["test"],
+  publicHeadersPath: "yoga",
+  // Android builds Yoga at -O2 in every build type, Debug included, so match it.
+  defines: [.unsafeFlags(["-O2"])]
 )
 
 // React-oscompat.podspec
@@ -128,7 +138,8 @@ let reactFeatureFlags = RNTarget(
 let reactPerfLogger = RNTarget(
   name: .reactPerfLogger,
   path: "ReactCommon/reactperflogger",
-  excludedPaths: ["fusebox"]
+  excludedPaths: ["fusebox"],
+  dependencies: [.reactDebug, .reactNativeDependencies]
 )
 
 /// React-logger.podspec
@@ -185,7 +196,7 @@ let reactJsInspector = RNTarget(
   name: .reactJsInspector,
   path: "ReactCommon/jsinspector-modern",
   excludedPaths: ["tracing", "network", "tests"],
-  dependencies: [.reactNativeDependencies, .reactFeatureFlags, .jsi, .reactJsInspectorTracing, .reactJsInspectorNetwork, .reactRuntimeExecutor, .reactPerfLogger],
+  dependencies: [.reactNativeDependencies, .reactFeatureFlags, .jsi, .reactJsInspectorTracing, .reactJsInspectorNetwork, .reactRuntimeExecutor, .reactPerfLogger, .reactUtils],
   defines: [
     CXXSetting.define("REACT_NATIVE_DEBUGGER_ENABLED", to: "1", .when(configuration: BuildConfiguration.debug)),
     CXXSetting.define("REACT_NATIVE_DEBUGGER_ENABLED_DEVONLY", to: "1", .when(configuration: BuildConfiguration.debug)),
@@ -279,13 +290,21 @@ let reactJsErrorHandler = RNTarget(
   dependencies: [.reactNativeDependencies, .jsi, .reactFeatureFlags, .reactDebug, .reactTurboModuleBridging]
 )
 
+/// React-renderercss.podspec
+let reactRendererCss = RNTarget(
+  name: .reactRendererCss,
+  path: "ReactCommon/react/renderer/css",
+  excludedPaths: ["tests"],
+  dependencies: [.reactNativeDependencies, .reactDebug, .reactUtils]
+)
+
 /// React-graphicsApple
 /// This represents the React-graphicsApple BUCK module
 let reactGraphicsApple = RNTarget(
   name: .reactGraphicsApple,
   path: "ReactCommon/react/renderer/graphics/platform/ios",
   linkedFrameworks: ["UIKit", "CoreGraphics"],
-  dependencies: [.reactDebug, .jsi, .reactUtils, .reactNativeDependencies]
+  dependencies: [.reactDebug, .jsi, .reactUtils, .reactNativeDependencies, .reactRendererCss]
 )
 
 /// React-graphics.podspec
@@ -293,7 +312,7 @@ let reactGraphics = RNTarget(
   name: .reactGraphics,
   path: "ReactCommon/react/renderer/graphics",
   excludedPaths: ["platform", "tests"],
-  dependencies: [.reactNativeDependencies, .jsi, .reactJsiExecutor, .reactRendererDebug, .reactUtils, .reactGraphicsApple]
+  dependencies: [.reactNativeDependencies, .jsi, .reactJsiExecutor, .reactRendererDebug, .reactUtils, .reactGraphicsApple, .reactRendererCss]
 )
 
 /// ReactCommon.podspec
@@ -352,6 +371,13 @@ let reactMutationObserverNativeModule = RNTarget(
   dependencies: [.reactNativeDependencies, .reactCxxReact, .reactFabric, .reactTurboModuleBridging, .reactTurboModuleCore, .yoga]
 )
 
+/// React-resizeobservernativemodule.podspec
+let reactResizeObserverNativeModule = RNTarget(
+  name: .reactResizeObserverNativeModule,
+  path: "ReactCommon/react/nativemodule/resizeobserver",
+  dependencies: [.reactNativeDependencies, .reactCxxReact, .reactFabric, .reactTurboModuleBridging, .reactTurboModuleCore, .reactGraphics, .reactGraphicsApple, .reactRuntimeScheduler, .yoga]
+)
+
 /// React-viewtransitionnativemodule.podspec
 let reactViewTransitionNativeModule = RNTarget(
   name: .reactViewTransitionNativeModule,
@@ -392,6 +418,7 @@ let reactCoreRCTWebsocket = RNTarget(
 let reactCoreModules = RNTarget(
   name: .reactCoreModules,
   path: "React/CoreModules",
+  linkedFrameworks: ["Accessibility"],
   excludedPaths: ["PlatformStubs/RCTStatusBarManager.mm"],
   dependencies: [.reactNativeDependencies, .jsi, .yoga, .reactTurboModuleCore, .reactFeatureFlags]
 )
@@ -427,7 +454,6 @@ let reactCore = RNTarget(
   path: "React",
   searchPaths: [
     "React/I18n",
-    "React/Profiler",
     "ReactCommon/react/runtime/platform/ios", // explicit header search path to break circular dependency. RCTHost imports `RCTDefines.h` in ReactCore, ReacCore needs to import RCTHost
   ],
   linkedFrameworks: ["CoreServices"],
@@ -443,6 +469,7 @@ let reactFabric = RNTarget(
   path: "ReactCommon/react/renderer",
   excludedPaths: [
     "animated/tests",
+    "animationbackend/tests",
     "animations/tests",
     "attributedstring/tests",
     "core/tests",
@@ -473,10 +500,11 @@ let reactFabric = RNTarget(
     "components/unimplementedview",
     "components/virtualview",
     "components/root/tests",
+    "observers/resize/tests",
     "scheduler/tests",
   ],
-  dependencies: [.reactNativeDependencies, .reactJsiExecutor, .rctTypesafety, .reactTurboModuleCore, .jsi, .logger, .reactDebug, .reactFeatureFlags, .reactUtils, .reactRuntimeScheduler, .reactCxxReact, .reactRendererDebug, .reactGraphics, .yoga, .reactJsInspectorTracing],
-  sources: ["animated", "animationbackend", "animations", "attributedstring", "core", "componentregistry", "componentregistry/native", "components/root", "components/view", "components/view/platform/cxx", "components/scrollview", "components/scrollview/platform/cxx", "components/scrollview/platform/ios", "components/legacyviewmanagerinterop", "components/legacyviewmanagerinterop/platform/ios", "dom", "scheduler", "mounting", "observers/events", "observers/intersection", "observers/mutation", "telemetry", "consistency", "leakchecker", "uimanager", "uimanager/consistency", "viewtransition"]
+  dependencies: [.reactNativeDependencies, .reactJsiExecutor, .rctTypesafety, .reactTurboModuleCore, .jsi, .logger, .reactDebug, .reactFeatureFlags, .reactUtils, .reactRuntimeScheduler, .reactCxxReact, .reactRendererDebug, .reactGraphics, .reactRendererCss, .yoga, .reactJsInspectorTracing],
+  sources: ["animated", "animationbackend", "animations", "attributedstring", "core", "componentregistry", "componentregistry/native", "components/root", "components/view", "components/view/platform/cxx", "components/scrollview", "components/scrollview/platform/cxx", "components/scrollview/platform/ios", "components/legacyviewmanagerinterop", "components/legacyviewmanagerinterop/platform/ios", "dom", "scheduler", "mounting", "observers/events", "observers/intersection", "observers/mutation", "observers/resize", "telemetry", "consistency", "leakchecker", "uimanager", "uimanager/consistency", "viewtransition"]
 )
 
 let reactFabricInputAccessory = RNTarget(
@@ -536,8 +564,8 @@ let reactFabricText = RNTarget(
 let reactFabricTextInput = RNTarget(
   name: .reactFabricTextInput,
   path: "ReactCommon/react/renderer/components/textinput",
-  excludedPaths: ["platform/android", "platform/macos"],
-  dependencies: [.reactNativeDependencies, .reactCore, .reactJsiExecutor, .reactTurboModuleCore, .jsi, .logger, .reactDebug, .reactFeatureFlags, .reactUtils, .reactRuntimeScheduler, .reactCxxReact, .yoga, .reactRendererDebug, .reactGraphics, .reactFabric, .reactTurboModuleBridging, .reactFabricTextLayoutManager],
+  excludedPaths: ["tests", "platform/android", "platform/macos"],
+  dependencies: [.reactNativeDependencies, .reactCore, .reactJsiExecutor, .reactTurboModuleCore, .jsi, .logger, .reactDebug, .reactFeatureFlags, .reactUtils, .reactRuntimeScheduler, .reactCxxReact, .yoga, .reactRendererDebug, .reactGraphics, .reactFabric, .reactTurboModuleBridging, .reactFabricTextLayoutManager, .reactImageManagerApple],
   sources: [".", "platform/ios"]
 )
 
@@ -697,6 +725,7 @@ let targets = [
   reactPerformanceTimeline,
   reactRuntimeScheduler,
   rctTypesafety,
+  reactRendererCss,
   reactGraphics,
   reactGraphicsApple,
   reactImageManager,
@@ -720,6 +749,7 @@ let targets = [
   reactWebPerformanceNativeModule,
   reactIntersectionObserverNativeModule,
   reactMutationObserverNativeModule,
+  reactResizeObserverNativeModule,
   reactViewTransitionNativeModule,
   reactFeatureflagsNativemodule,
   reactNativeModuleDom,
@@ -912,6 +942,7 @@ extension String {
   static let reactWebPerformanceNativeModule = "React-webperformancenativemodule"
   static let reactIntersectionObserverNativeModule = "React-intersectionobservernativemodule"
   static let reactMutationObserverNativeModule = "React-mutationobservernativemodule"
+  static let reactResizeObserverNativeModule = "React-resizeobservernativemodule"
   static let reactViewTransitionNativeModule = "React-viewtransitionnativemodule"
   static let reactFeatureflagsNativemodule = "React-featureflagsnativemodule"
   static let reactNativeModuleDom = "React-domnativemodule"
@@ -948,6 +979,14 @@ extension Target {
         CXXSetting.headerSearchPath(relativeSearchPath(numOfSlash + 1, ".build/headers/React")),
       ]
 
+    let legacyInteropDefines: [CXXSetting] =
+      (REMOVE_LEGACY_MODULE_INTEROP ? [.define("RCT_REMOVE_LEGACY_MODULE_INTEROP", to: "1")] : [])
+      + (REMOVE_LEGACY_COMPONENT_INTEROP ? [.define("RCT_REMOVE_LEGACY_COMPONENT_INTEROP", to: "1")] : [])
+
+    // Every target built through this factory is React Native's own, so RN_BUILDING
+    // keeps the react/cxxstableapi guards inert for internal sources. cxxSettings are
+    // per-target and are not inherited by packages that depend on React, so this does
+    // not exempt consumers from the guards.
     let cxxSettings =
       [
         .unsafeFlags(["-std=c++20"]),
@@ -956,7 +995,8 @@ extension Target {
         .define("USE_HERMES", to: "1"),
         .define("RCT_REMOVE_LEGACY_ARCH", to: "1"),
         .define("HERMES_V1_ENABLED", to: "1"),
-      ] + defines + cxxCommonHeaderPaths
+        .define("RN_BUILDING", to: "1"),
+      ] + legacyInteropDefines + defines + cxxCommonHeaderPaths
 
     return .target(
       name: name,

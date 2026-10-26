@@ -50,6 +50,7 @@ TODO: Explain the different components of React Native at a high level.
       - Layout
       - Mounting
       - [Animation Backend](../packages/react-native/ReactCommon/react/renderer/animationbackend/__docs__/AnimationBackend.md)
+      - [Native Animated](../packages/react-native/ReactCommon/react/renderer/animated/__docs__/NativeAnimated.md)
     - Native Modules / TurboModules
     - JS Runtime
       - [Event Loop](../packages/react-native/ReactCommon/react/renderer/runtimescheduler/__docs__/README.md)
@@ -77,9 +78,11 @@ TODO: Explain the different components of React Native at a high level.
     - UI
       - Events
       - Mounting
+    - [Bundler Connection](../packages/react-native/React/DevSupport/__docs__/README.md)
 - Build system
   - Android
   - iOS
+    - [SwiftPM](../packages/react-native/scripts/spm/__docs__/README.md)
   - C++
   - JavaScript
     - Metro

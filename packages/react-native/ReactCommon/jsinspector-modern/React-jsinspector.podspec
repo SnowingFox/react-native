@@ -54,6 +54,8 @@ Pod::Spec.new do |s|
   add_dependency(s, "React-jsinspectornetwork", :framework_name => 'jsinspector_modernnetwork')
   add_dependency(s, "React-jsinspectortracing", :framework_name => 'jsinspector_moderntracing')
   s.dependency "React-perflogger", version
+  s.dependency "React-cxxstableapi"
+  s.dependency "React-timing"
   add_dependency(s, "React-oscompat")
   add_dependency(s, "React-utils", :additional_framework_paths => ["react/utils/platform/ios"])
   if use_hermes()
@@ -62,4 +64,6 @@ Pod::Spec.new do |s|
 
   add_rn_third_party_dependencies(s)
   add_rncore_dependency(s)
+
+  mark_as_react_native_build(s)
 end

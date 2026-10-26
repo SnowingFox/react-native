@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
 #include <react/renderer/components/view/ViewProps.h>
 #include <react/renderer/core/ShadowNodeTraits.h>
 
@@ -20,13 +22,13 @@ inline bool formsStackingContext(const ViewProps &viewProps)
 inline bool formsView(const ViewProps &viewProps)
 {
   return viewProps.nativeBackground.has_value() || viewProps.nativeForeground.has_value() || viewProps.focusable ||
-      viewProps.hasTVPreferredFocus || viewProps.needsOffscreenAlphaCompositing ||
-      viewProps.renderToHardwareTextureAndroid || viewProps.screenReaderFocusable;
+      viewProps.needsOffscreenAlphaCompositing || viewProps.renderToHardwareTextureAndroid ||
+      viewProps.screenReaderFocusable;
 }
 
 inline bool isKeyboardFocusable(const ViewProps &viewProps)
 {
-  return (viewProps.focusable || viewProps.hasTVPreferredFocus);
+  return viewProps.focusable;
 }
 
 } // namespace facebook::react::HostPlatformViewTraitsInitializer

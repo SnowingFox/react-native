@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @generated SignedSource<<3c9dc8c1fa921fa0431dc043fc252760>>
+ * @generated SignedSource<<4b66991416806affd46aab79e36c4a45>>
  */
 
 /**
@@ -18,6 +18,8 @@
  */
 
 #pragma once
+
+#include <react/cxxstableapi/PrivateGuard.h>
 
 #include <react/featureflags/ReactNativeFeatureFlagsOverridesOSSStable.h>
 
@@ -35,11 +37,23 @@ class ReactNativeFeatureFlagsOverridesOSSCanary : public ReactNativeFeatureFlags
     return true;
   }
 
+  bool enableImperativeEvents() override {
+    return true;
+  }
+
   bool enableIntersectionObserverByDefault() override {
     return true;
   }
 
   bool enableSwiftUIBasedFilters() override {
+    return true;
+  }
+
+  bool fixBorderlessRippleAndroid() override {
+    return true;
+  }
+
+  bool fuseboxFrameRecordingEnabled() override {
     return true;
   }
 

@@ -9,7 +9,7 @@
  */
 
 import '@react-native/fantom/src/setUpDefaultReactNativeEnvironment';
-import type {FlatListProps} from 'react-native/Libraries/Lists/FlatList';
+import type {FlatListProps} from 'react-native';
 
 import * as Fantom from '@react-native/fantom';
 import nullthrows from 'nullthrows';
@@ -676,6 +676,12 @@ describe('<FlatList>', () => {
 
         // Items must remain viewable for `minimumViewTime` before being
         // reported, so nothing has fired yet.
+        expect(onViewableItemsChanged).not.toHaveBeenCalled();
+
+        timers.advanceTimersByTime(200);
+
+        // The first timer represents an intermediate viewport snapshot and
+        // must not publish after the final visible set supersedes it.
         expect(onViewableItemsChanged).not.toHaveBeenCalled();
 
         timers.advanceTimersByTime(200);

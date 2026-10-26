@@ -43,7 +43,19 @@ internal class DeviceInfoModule(reactContext: ReactApplicationContext) :
     windowDisplayMetrics.setTo(reactApplicationContext.resources.displayMetrics)
 
     val activity = reactApplicationContext.currentActivity ?: return windowDisplayMetrics
-    val bounds = WindowMetricsCalculator.getOrCreate().computeCurrentWindowMetrics(activity).bounds
+    val bounds =
+        try {
+          WindowMetricsCalculator.getOrCreate().computeCurrentWindowMetrics(activity).bounds
+        } catch (error: NoSuchMethodError) {
+          ReactSoftExceptionLogger.logSoftException(
+              NAME,
+              ReactNoCrashSoftException(
+                  "WindowMetrics API is unavailable; falling back to resource display metrics.",
+                  error,
+              ),
+          )
+          return windowDisplayMetrics
+        }
 
     if (isEdgeToEdgeFeatureFlagOn) {
       windowDisplayMetrics.widthPixels = bounds.width()
@@ -90,6 +102,7 @@ internal class DeviceInfoModule(reactContext: ReactApplicationContext) :
         putDouble("densityDpi", displayMetrics.densityDpi.toDouble())
       }
 
+  @Suppress("REDUNDANT_VISIBILITY_MODIFIER")
   public override fun getTypedExportedConstants(): Map<String, Any> {
     val displayMetrics = getDisplayMetricsWritableMap()
 

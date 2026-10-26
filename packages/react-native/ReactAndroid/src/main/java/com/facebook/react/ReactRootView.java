@@ -8,7 +8,6 @@
 package com.facebook.react;
 
 import static com.facebook.infer.annotation.ThreadConfined.UI;
-import static com.facebook.react.uimanager.BlendModeHelper.needsIsolatedLayer;
 import static com.facebook.react.uimanager.common.UIManagerType.FABRIC;
 import static com.facebook.systrace.Systrace.TRACE_TAG_REACT;
 
@@ -117,16 +116,19 @@ public class ReactRootView extends FrameLayout implements RootView, ReactRoot {
   private int mLastOffsetY = Integer.MIN_VALUE;
   private final AtomicInteger mState = new AtomicInteger(STATE_STOPPED);
 
+  @SuppressWarnings("this-escape")
   public ReactRootView(Context context) {
     super(context);
     init();
   }
 
+  @SuppressWarnings("this-escape")
   public ReactRootView(Context context, AttributeSet attrs) {
     super(context, attrs);
     init();
   }
 
+  @SuppressWarnings("this-escape")
   public ReactRootView(Context context, AttributeSet attrs, int defStyle) {
     super(context, attrs, defStyle);
     init();
@@ -305,7 +307,7 @@ public class ReactRootView extends FrameLayout implements RootView, ReactRoot {
   protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
 
     BlendMode mixBlendMode = null;
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && needsIsolatedLayer(this)) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       mixBlendMode = (BlendMode) child.getTag(R.id.mix_blend_mode);
       if (mixBlendMode != null) {
         Paint p = new Paint();

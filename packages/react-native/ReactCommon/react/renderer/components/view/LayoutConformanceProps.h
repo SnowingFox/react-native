@@ -7,8 +7,10 @@
 
 #pragma once
 
-#include <react/renderer/components/view/YogaStylableProps.h>
-#include <react/renderer/components/view/propsConversions.h>
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/RendererCore.h>
+#include <React/View.h>
 
 namespace facebook::react {
 

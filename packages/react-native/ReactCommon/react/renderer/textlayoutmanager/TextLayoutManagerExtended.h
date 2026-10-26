@@ -7,12 +7,14 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <glog/logging.h>
 #include <cstddef>
 
+#include <React/Graphics.h>
 #include <react/renderer/attributedstring/AttributedStringBox.h>
 #include <react/renderer/attributedstring/ParagraphAttributes.h>
-#include <react/renderer/graphics/Size.h>
 #include <react/renderer/textlayoutmanager/TextLayoutManager.h>
 #include <react/renderer/textlayoutmanager/TextMeasureCache.h>
 
@@ -116,6 +118,7 @@ using TextLayoutManagerExtended = detail::TextLayoutManagerExtended<TextLayoutMa
 
 struct MeasuredPreparedTextLayout {
   LayoutConstraints layoutConstraints;
+  Float pointScaleFactor{1.0};
   TextMeasurement measurement;
   TextLayoutManagerExtended::PreparedTextLayout preparedTextLayout{};
 };

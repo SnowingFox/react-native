@@ -8,8 +8,7 @@
  * @format
  */
 
-// $FlowFixMe[unclear-type] unclear type of events
-type UnsafeEventObject = Object;
+type UnsafeEventObject = LegacyObject;
 
 export interface EventSubscription {
   remove(): void;
@@ -78,13 +77,12 @@ export default class EventEmitter<
   TEventToArgsMap extends Readonly<
     Record<string, ReadonlyArray<UnsafeEventObject>>,
   > = Readonly<Record<string, ReadonlyArray<UnsafeEventObject>>>,
-> implements IEventEmitter<TEventToArgsMap>
-{
+> implements IEventEmitter<TEventToArgsMap> {
   #registry: Registry<TEventToArgsMap>;
 
   constructor() {
     // $FlowFixMe[incompatible-type]
-    this.#registry = {};
+    this.#registry = Object.create(null);
   }
 
   /**
@@ -147,8 +145,9 @@ export default class EventEmitter<
   ): void {
     if (eventType == null) {
       // $FlowFixMe[incompatible-type]
-      this.#registry = {};
+      this.#registry = Object.create(null);
     } else {
+      // $FlowFixMe[cannot-write]
       delete this.#registry[eventType];
     }
   }
@@ -178,6 +177,7 @@ function allocate<
     registry[eventType];
   if (registrations == null) {
     registrations = new Set();
+    // $FlowFixMe[cannot-write]
     registry[eventType] = registrations;
   }
   return registrations;

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #ifdef WITH_FBSYSTRACE
 #include <fbsystrace.h>
 #endif
@@ -30,6 +32,10 @@
 // clang-format on
 
 #include <reactperflogger/ReactPerfettoCategories.h>
+#endif
+
+#if defined(__ANDROID__) && __ANDROID_API__ >= 23 && !defined(WITH_PERFETTO) && !defined(WITH_FBSYSTRACE)
+#include <android/trace.h>
 #endif
 
 #if defined(__APPLE__)
@@ -93,6 +99,34 @@ struct ConcreteTraceSection {
   fbsystrace::FbSystraceSection m_section;
 };
 using TraceSectionUnwrapped = ConcreteTraceSection;
+#elif defined(__ANDROID__) && __ANDROID_API__ >= 23
+// Route TraceSection to the platform ATrace API so
+// that C++ sections show up in Perfetto/systrace captures of OSS builds.
+struct ATraceSection {
+ public:
+  template <typename... ConvertsToStringPiece>
+  explicit ATraceSection(const char *name, [[maybe_unused]] ConvertsToStringPiece &&...args)
+  {
+    if (ATrace_isEnabled()) {
+      ATrace_beginSection(name);
+      active_ = true;
+    }
+  }
+
+  ~ATraceSection()
+  {
+    if (active_) {
+      ATrace_endSection();
+    }
+  }
+
+  ATraceSection(const ATraceSection &) = delete;
+  ATraceSection &operator=(const ATraceSection &) = delete;
+
+ private:
+  bool active_{false};
+};
+using TraceSectionUnwrapped = ATraceSection;
 #else
 struct DummyTraceSection {
  public:

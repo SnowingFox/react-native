@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
 #include <react/renderer/components/view/BaseViewProps.h>
 #include <react/renderer/components/view/NativeDrawable.h>
 #include <react/renderer/components/view/primitives.h>
@@ -40,7 +42,6 @@ class HostPlatformViewProps : public BaseViewProps {
   std::optional<NativeDrawable> nativeForeground{};
 
   bool focusable{false};
-  bool hasTVPreferredFocus{false};
   bool needsOffscreenAlphaCompositing{false};
   bool renderToHardwareTextureAndroid{false};
   bool screenReaderFocusable{false};

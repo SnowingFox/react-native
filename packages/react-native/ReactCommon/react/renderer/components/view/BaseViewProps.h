@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
 #include <react/renderer/components/view/AccessibilityProps.h>
 #include <react/renderer/components/view/YogaStylableProps.h>
 #include <react/renderer/components/view/primitives.h>
@@ -101,6 +103,7 @@ class BaseViewProps : public YogaStylableProps, public AccessibilityProps {
   PointerEventsMode pointerEvents{};
   EdgeInsets hitSlop{};
   bool onLayout{};
+  bool onSafeAreaInsetsChange{};
 
   ViewEvents events{};
 

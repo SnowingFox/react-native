@@ -7,9 +7,11 @@
 
 #pragma once
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
+#include <React/Utils.h>
 #include <react/renderer/imagemanager/ImageRequest.h>
 #include <react/renderer/imagemanager/ImageRequestParams.h>
-#include <react/utils/ContextContainer.h>
 #include <memory>
 #include <mutex>
 #include <unordered_map>

@@ -16,6 +16,7 @@ import hotdog from '../../assets/hotdog.jpg';
 import RNTesterText from '../../components/RNTesterText';
 import TextLegend from '../../components/TextLegend';
 import TextSharedExamples from './TextSharedExamples';
+import TextWidthModeExample from './TextWidthModeExample';
 
 const TextInlineView = require('../../components/TextInlineView');
 const React = require('react');
@@ -209,6 +210,14 @@ class AdjustingFontSize extends React.Component<
           adjustsFontSizeToFit={true}
           style={{fontSize: 40, marginVertical: 6}}>
           Shrinking to fit available space is much better!
+        </Text>
+
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit={true}
+          minimumFontScale={0.5}
+          style={{fontSize: 40, marginVertical: 6}}>
+          Can limit how small the text becomes with minimumFontScale
         </Text>
 
         <Text
@@ -571,6 +580,13 @@ class TextWithCapBaseBox extends React.Component<
 }
 
 const examples = [
+  {
+    title: 'Wrapped text width mode',
+    name: 'textWidthMode',
+    description:
+      'Compares automatic constrained text width with text sized to its longest rendered line.',
+    render: TextWidthModeExample,
+  },
   {
     title: 'iOS System Font Families (iOS only)',
     name: 'iOSSystemFontFamilies',
@@ -1252,6 +1268,18 @@ const examples = [
           </Text>
           <Text allowFontScaling={true} maxFontSizeMultiplier={1}>
             <Text maxFontSizeMultiplier={0}>Ignore inherited max (no max)</Text>
+          </Text>
+          <Text
+            allowFontScaling={true}
+            maxFontSizeMultiplier={1}
+            style={{
+              marginTop: 10,
+              lineHeight: 20,
+              letterSpacing: 1,
+              backgroundColor: 'lightgray',
+            }}>
+            lineHeight and letterSpacing are capped too (max 1x): these lines
+            keep the same spacing at any system font size
           </Text>
           <Text
             allowFontScaling={true}

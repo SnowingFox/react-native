@@ -13,8 +13,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -51,8 +51,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -112,8 +112,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -155,8 +155,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -252,8 +252,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -971,8 +971,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -1009,8 +1009,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -1083,6 +1083,9 @@ protected:
     eventEmitterMap_[\\"onEvent4\\"] = std::make_shared<AsyncEventEmitter<jsi::Value>>();
     eventEmitterMap_[\\"onEvent5\\"] = std::make_shared<AsyncEventEmitter<jsi::Value>>();
     eventEmitterMap_[\\"onEvent6\\"] = std::make_shared<AsyncEventEmitter<jsi::Value>>();
+    eventEmitterMap_[\\"onEvent7\\"] = std::make_shared<AsyncEventEmitter<jsi::Value>>();
+    eventEmitterMap_[\\"onEvent8\\"] = std::make_shared<AsyncEventEmitter<jsi::Value>>();
+    eventEmitterMap_[\\"onEvent9\\"] = std::make_shared<AsyncEventEmitter<jsi::Value>>();
   }
   
   void emitOnEvent1() {
@@ -1123,6 +1126,27 @@ protected:
       return bridging::toJs(rt, eventValue, jsInvoker);
     });
   }
+
+  template <typename OnEvent7Type> void emitOnEvent7(OnEvent7Type value) {
+    static_assert(bridging::supportsFromJs<OnEvent7Type, double>, \\"value cannnot be converted to double\\");
+    static_cast<AsyncEventEmitter<jsi::Value>&>(*eventEmitterMap_[\\"onEvent7\\"]).emit([jsInvoker = jsInvoker_, eventValue = value](jsi::Runtime& rt) -> jsi::Value {
+      return bridging::toJs(rt, eventValue, jsInvoker);
+    });
+  }
+
+  template <typename OnEvent8Type> void emitOnEvent8(OnEvent8Type value) {
+    static_assert(bridging::supportsFromJs<OnEvent8Type, double>, \\"value cannnot be converted to double\\");
+    static_cast<AsyncEventEmitter<jsi::Value>&>(*eventEmitterMap_[\\"onEvent8\\"]).emit([jsInvoker = jsInvoker_, eventValue = value](jsi::Runtime& rt) -> jsi::Value {
+      return bridging::toJs(rt, eventValue, jsInvoker);
+    });
+  }
+
+  template <typename OnEvent9Type> void emitOnEvent9(OnEvent9Type value) {
+    static_assert(bridging::supportsFromJs<OnEvent9Type, int>, \\"value cannnot be converted to int\\");
+    static_cast<AsyncEventEmitter<jsi::Value>&>(*eventEmitterMap_[\\"onEvent9\\"]).emit([jsInvoker = jsInvoker_, eventValue = value](jsi::Runtime& rt) -> jsi::Value {
+      return bridging::toJs(rt, eventValue, jsInvoker);
+    });
+  }
 private:
   static jsi::Value __voidFunc(jsi::Runtime &rt, TurboModule &turboModule, const jsi::Value* /*args*/, size_t /*count*/) {
     static_assert(
@@ -1150,8 +1174,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -1272,8 +1296,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -1809,8 +1833,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -2025,8 +2049,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -2076,8 +2100,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -2147,8 +2171,8 @@ Map {
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 

@@ -25,6 +25,7 @@ import com.facebook.react.uimanager.ViewGroupManager
 import com.facebook.react.uimanager.ViewManagerDelegate
 import com.facebook.react.uimanager.annotations.ReactProp
 import com.facebook.react.uimanager.events.EventDispatcher
+import com.facebook.react.uimanager.internal.FloatPropertySanitizer
 import com.facebook.react.viewmanagers.AndroidDrawerLayoutManagerDelegate
 import com.facebook.react.viewmanagers.AndroidDrawerLayoutManagerInterface
 import com.facebook.react.views.drawer.events.DrawerClosedEvent
@@ -142,7 +143,7 @@ public class ReactDrawerLayoutManager :
   public override fun setStatusBarBackgroundColor(view: ReactDrawerLayout, value: Int?): Unit = Unit
 
   public override fun setElevation(view: ReactDrawerLayout, elevation: Float) {
-    view.drawerElevation = elevation.dpToPx()
+    view.drawerElevation = FloatPropertySanitizer.sanitizeFloatPropertyValue(elevation.dpToPx())
   }
 
   public override fun needsCustomLayoutForChildren(): Boolean {
@@ -150,10 +151,11 @@ public class ReactDrawerLayoutManager :
     return true
   }
 
-  public override fun getCommandsMap(): Map<String, Int> = mapOf(
-      COMMAND_OPEN_DRAWER to OPEN_DRAWER,
-      COMMAND_CLOSE_DRAWER to CLOSE_DRAWER,
-  )
+  public override fun getCommandsMap(): Map<String, Int> =
+      mapOf(
+          COMMAND_OPEN_DRAWER to OPEN_DRAWER,
+          COMMAND_CLOSE_DRAWER to CLOSE_DRAWER,
+      )
 
   @Deprecated(
       message =
@@ -164,20 +166,21 @@ public class ReactDrawerLayoutManager :
       view: ReactDrawerLayout,
       commandId: Int,
       args: ReadableArray?,
-  ): Unit {
+  ) {
     when (commandId) {
       OPEN_DRAWER -> view.openDrawer()
       CLOSE_DRAWER -> view.closeDrawer()
     }
   }
 
-  public override fun getExportedViewConstants(): Map<String, Any> = mapOf(
-      DRAWER_POSITION to
-          mapOf(
-              DRAWER_POSITION_LEFT to Gravity.START,
-              DRAWER_POSITION_RIGHT to Gravity.END,
-          ),
-  )
+  public override fun getExportedViewConstants(): Map<String, Any> =
+      mapOf(
+          DRAWER_POSITION to
+              mapOf(
+                  DRAWER_POSITION_LEFT to Gravity.START,
+                  DRAWER_POSITION_RIGHT to Gravity.END,
+              ),
+      )
 
   public override fun getExportedCustomDirectEventTypeConstants(): Map<String, Any> {
     val eventTypeConstants = super.getExportedCustomDirectEventTypeConstants() ?: mutableMapOf()

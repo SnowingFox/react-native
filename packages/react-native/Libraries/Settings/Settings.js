@@ -4,13 +4,13 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @flow
+ * @flow strict-local
  * @format
  */
 
 type SettingsStatic = {
-  get(key: string): any,
-  set(settings: Object): void,
+  get<T = unknown>(key: string): ?T,
+  set(settings: {[string]: unknown, ...}): void,
   watchKeys(keys: string | Array<string>, callback: () => void): number,
   clearWatch(watchId: number): void,
   ...
@@ -32,11 +32,11 @@ function getSettings(): SettingsStatic {
 }
 
 const Settings: SettingsStatic = {
-  get(key: string): any {
-    return getSettings().get(key);
+  get<T = unknown>(key: string): ?T {
+    return getSettings().get<T>(key);
   },
 
-  set(settings: Object): void {
+  set(settings: {[string]: unknown, ...}): void {
     getSettings().set(settings);
   },
 

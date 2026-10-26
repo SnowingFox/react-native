@@ -18,13 +18,11 @@
 #include <react/devsupport/IDevUIDelegate.h>
 #include <react/devsupport/PackagerConnection.h>
 #include <react/devsupport/inspector/Inspector.h>
-#include <react/featureflags/ReactNativeFeatureFlags.h>
 #include <react/http/IHttpClient.h>
 #include <react/http/IWebSocketClient.h>
 #include <react/io/ResourceLoader.h>
 #include <react/logging/LogOnce.h>
 #include <react/renderer/componentregistry/native/NativeComponentRegistryBinding.h>
-#include <react/renderer/runtimescheduler/RuntimeSchedulerCallInvoker.h>
 #include <react/renderer/scheduler/SchedulerDelegate.h>
 #include <react/renderer/scheduler/SchedulerDelegateImpl.h>
 #include <react/renderer/scheduler/SurfaceDelegate.h>
@@ -248,8 +246,7 @@ void ReactHost::createReactInstance() {
 
   reactInstanceData_->mountingManager->setUIManager(scheduler_->getUIManager());
 
-  auto jsInvoker = std::make_shared<RuntimeSchedulerCallInvoker>(
-      reactInstance_->getRuntimeScheduler());
+  auto jsInvoker = reactInstance_->createJSCallInvoker();
 
   if (inspector_ != nullptr) {
     inspector_->connectDebugger(devServerHelper_->getInspectorUrl());

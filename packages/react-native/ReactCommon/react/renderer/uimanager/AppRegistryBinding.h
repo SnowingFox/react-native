@@ -7,9 +7,14 @@
 
 #pragma once
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
+#include <React/RendererCore.h>
+
 #include <folly/dynamic.h>
 #include <jsi/jsi.h>
-#include <react/renderer/core/ReactPrimitives.h>
+
+#include <string>
 
 namespace facebook::react {
 

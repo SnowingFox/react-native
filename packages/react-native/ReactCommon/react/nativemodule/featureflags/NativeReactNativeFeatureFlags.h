@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @generated SignedSource<<741340cf9c128417368324bb80501f18>>
+ * @generated SignedSource<<08c7aeb5d0329359da0e21fea43007df>>
  */
 
 /**
@@ -18,6 +18,8 @@
  */
 
 #pragma once
+
+#include <react/cxxstableapi/PrivateGuard.h>
 
 #if __has_include("FBReactNativeSpecJSI.h") // CocoaPod headers on Apple
 #include "FBReactNativeSpecJSI.h"
@@ -44,7 +46,13 @@ class NativeReactNativeFeatureFlags
 
   bool defaultTextToOverflowHidden(jsi::Runtime& runtime);
 
+  bool deferTextInputTruncationIOS(jsi::Runtime& runtime);
+
   bool disableEarlyViewCommandExecution(jsi::Runtime& runtime);
+
+  bool disableIdleEventDispatchFrameCallbackRearmAndroid(jsi::Runtime& runtime);
+
+  bool disableIdleMountItemFrameCallbackRearmAndroid(jsi::Runtime& runtime);
 
   bool disableImageViewPreallocationAndroid(jsi::Runtime& runtime);
 
@@ -60,9 +68,11 @@ class NativeReactNativeFeatureFlags
 
   bool enableAccumulatedUpdatesInRawPropsAndroid(jsi::Runtime& runtime);
 
-  bool enableAndroidFontWeightAdjustment(jsi::Runtime& runtime);
+  bool enableAndroidAutoOffscreenCompositingForElevation(jsi::Runtime& runtime);
 
   bool enableAndroidTextMeasurementOptimizations(jsi::Runtime& runtime);
+
+  bool enableAsyncDiskCacheCheckInMultiSourceImageAndroid(jsi::Runtime& runtime);
 
   bool enableBridgelessArchitecture(jsi::Runtime& runtime);
 
@@ -80,9 +90,13 @@ class NativeReactNativeFeatureFlags
 
   bool enableFabricCommitBranching(jsi::Runtime& runtime);
 
+  bool enableFabricCommitBranchingMergeOnMainThread(jsi::Runtime& runtime);
+
   bool enableFabricLogs(jsi::Runtime& runtime);
 
   bool enableFlexboxAutoMinSizeInStrictMode(jsi::Runtime& runtime);
+
+  bool enableFollowUpMountItemDispatchAndroid(jsi::Runtime& runtime);
 
   bool enableFontScaleChangesUpdatingLayout(jsi::Runtime& runtime);
 
@@ -97,6 +111,8 @@ class NativeReactNativeFeatureFlags
   bool enableImageTransparentTintColor(jsi::Runtime& runtime);
 
   bool enableImmediateUpdateModeForContentOffsetChanges(jsi::Runtime& runtime);
+
+  bool enableImperativeEvents(jsi::Runtime& runtime);
 
   bool enableImperativeFocus(jsi::Runtime& runtime);
 
@@ -118,13 +134,13 @@ class NativeReactNativeFeatureFlags
 
   bool enableNativeCSSParsing(jsi::Runtime& runtime);
 
+  bool enablePreallocatedPropsDiffOnInsertAndroid(jsi::Runtime& runtime);
+
   bool enablePreparedTextLayout(jsi::Runtime& runtime);
 
   bool enablePropsUpdateReconciliationAndroid(jsi::Runtime& runtime);
 
-  bool enableRuntimeSchedulerQueueClearingOnError(jsi::Runtime& runtime);
-
-  bool enableSchedulerDelegateInvalidation(jsi::Runtime& runtime);
+  bool enableResizeObserverByDefault(jsi::Runtime& runtime);
 
   bool enableSwiftUIBasedFilters(jsi::Runtime& runtime);
 
@@ -142,9 +158,11 @@ class NativeReactNativeFeatureFlags
 
   bool enableVirtualViewContainerStateExperimental(jsi::Runtime& runtime);
 
-  bool fixDifferentiatorParentTagForUnflattenCase(jsi::Runtime& runtime);
+  bool fixBorderlessRippleAndroid(jsi::Runtime& runtime);
 
   bool fixMappingOfEventPrioritiesBetweenFabricAndReact(jsi::Runtime& runtime);
+
+  bool fixTextLayoutOnPixelDensityChange(jsi::Runtime& runtime);
 
   bool fixYogaFlexBasisFitContentInMainAxis(jsi::Runtime& runtime);
 
@@ -157,6 +175,8 @@ class NativeReactNativeFeatureFlags
   bool fuseboxScreenshotCaptureEnabled(jsi::Runtime& runtime);
 
   bool fuseboxWebSocketEventsEnabled(jsi::Runtime& runtime);
+
+  bool keepTimersRunningWhileHostPausedAndroid(jsi::Runtime& runtime);
 
   bool optimizedAnimatedPropUpdates(jsi::Runtime& runtime);
 
@@ -180,6 +200,8 @@ class NativeReactNativeFeatureFlags
 
   bool skipActivityIdentityAssertionOnHostPause(jsi::Runtime& runtime);
 
+  bool skipUnchangedChildrenInDifferentiator(jsi::Runtime& runtime);
+
   bool syncAndroidClipBoundsWithOverflow(jsi::Runtime& runtime);
 
   bool traceTurboModulePromiseRejectionsOnAndroid(jsi::Runtime& runtime);
@@ -201,6 +223,8 @@ class NativeReactNativeFeatureFlags
   bool useTraitHiddenOnAndroid(jsi::Runtime& runtime);
 
   bool useTurboModuleInterop(jsi::Runtime& runtime);
+
+  bool useWindowDensityForDisplayMetricsAndroid(jsi::Runtime& runtime);
 
   double viewCullingOutsetRatio(jsi::Runtime& runtime);
 

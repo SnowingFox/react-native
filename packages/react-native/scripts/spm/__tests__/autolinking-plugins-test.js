@@ -34,18 +34,43 @@ describe('discoverPlugins', () => {
     return {name, root};
   }
 
-  // readConfig fake: a dep opts in when opted[name] is truthy.
+  // A dep opts in through its package.json; `noConfig` stands in for the
+  // react-native.config.js the caller loads (absent for these cases).
+  const declarePlugin = dep =>
+    fs.writeFileSync(
+      path.join(dep.root, 'package.json'),
+      JSON.stringify({
+        name: dep.name,
+        swiftpmConfig: {autolinkingPlugin: './plugin.js'},
+      }),
+    );
+  const noConfig = () => null;
+
+  // The deprecated home, which Expo still ships.
   const readConfigFor = opted => root => {
     const name = path.basename(root);
     return opted[name] ? {spm: {autolinkingPlugin: './plugin.js'}} : null;
   };
 
-  it('discovers a plugin declared via react-native.config.js', () => {
+  it('discovers a plugin declared in package.json', () => {
     const dep = makeDep('expo', 'module.exports = () => ({});');
-    const found = discoverPlugins([dep], readConfigFor({expo: true}));
+    declarePlugin(dep);
+    const found = discoverPlugins([dep], noConfig);
     expect(found).toHaveLength(1);
     expect(found[0].depName).toBe('expo');
     expect(typeof found[0].plugin).toBe('function');
+  });
+
+  it('still discovers a plugin declared the deprecated way', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const dep = makeDep('expo', 'module.exports = () => ({});');
+      const found = discoverPlugins([dep], readConfigFor({expo: true}));
+      expect(found).toHaveLength(1);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('skips deps that do not declare a plugin', () => {
@@ -55,27 +80,31 @@ describe('discoverPlugins', () => {
 
   it('honors the app deny-list (opt-out, no allowlist needed)', () => {
     const dep = makeDep('expo', 'module.exports = () => ({});');
-    const found = discoverPlugins([dep], readConfigFor({expo: true}), ['expo']);
-    expect(found).toHaveLength(0);
+    declarePlugin(dep);
+    expect(discoverPlugins([dep], noConfig, ['expo'])).toHaveLength(0);
   });
 
   it('accepts default/plugin export interop', () => {
     const a = makeDep('a', 'module.exports.default = () => ({});');
     const b = makeDep('b', 'module.exports.plugin = () => ({});');
-    const found = discoverPlugins([a, b], readConfigFor({a: true, b: true}));
+    declarePlugin(a);
+    declarePlugin(b);
+    const found = discoverPlugins([a, b], noConfig);
     expect(found.map(f => f.depName).sort()).toEqual(['a', 'b']);
   });
 
   it('fails closed when the plugin module is missing', () => {
     const dep = makeDep('expo', null); // opted in below but no plugin.js
-    expect(() => discoverPlugins([dep], readConfigFor({expo: true}))).toThrow(
+    declarePlugin(dep);
+    expect(() => discoverPlugins([dep], noConfig)).toThrow(
       /failed to load the autolinking plugin for 'expo'/,
     );
   });
 
   it('fails closed when the module does not export a function', () => {
     const dep = makeDep('expo', 'module.exports = {nope: 1};');
-    expect(() => discoverPlugins([dep], readConfigFor({expo: true}))).toThrow(
+    declarePlugin(dep);
+    expect(() => discoverPlugins([dep], noConfig)).toThrow(
       /does not export a function/,
     );
   });
@@ -339,5 +368,205 @@ describe('invokePlugins', () => {
     }).not.toThrow();
     expect(res.watchPaths).toEqual([]);
     expect(warnings.some(w => /non-array watchPaths/.test(w))).toBe(true);
+  });
+
+  it('merges scriptPhases across plugins, preserving optional fields', () => {
+    const res = invokePlugins(
+      [
+        mk('expo-constants', () => ({
+          scriptPhases: [
+            {
+              id: 'expo-constants.generate-app-config',
+              name: 'Generate Expo App Config',
+              script: 'node ./write-app-config.js',
+              position: 'beforeCompile',
+              inputPaths: ['$(SRCROOT)/../app.config.js'],
+              outputPaths: ['$(DERIVED_FILE_DIR)/app.config'],
+              alwaysOutOfDate: true,
+            },
+          ],
+        })),
+        mk('b', () => ({
+          scriptPhases: [{id: 'b.stamp', name: 'Stamp', script: 'echo hi'}],
+        })),
+      ],
+      ctx,
+    );
+    expect(res.scriptPhases).toEqual([
+      {
+        id: 'expo-constants.generate-app-config',
+        name: 'Generate Expo App Config',
+        script: 'node ./write-app-config.js',
+        position: 'beforeCompile',
+        inputPaths: ['$(SRCROOT)/../app.config.js'],
+        outputPaths: ['$(DERIVED_FILE_DIR)/app.config'],
+        alwaysOutOfDate: true,
+      },
+      {id: 'b.stamp', name: 'Stamp', script: 'echo hi', position: 'end'},
+    ]);
+  });
+
+  // A package's own npm name is the obvious stable id, and the scoped form is
+  // the common one (`@expo/log-box` is a named consumer).
+  it.each([['@expo/log-box'], ['@expo/ui']])(
+    'accepts the scoped npm name %s as a scriptPhase id',
+    id => {
+      const res = invokePlugins(
+        [mk('expo', () => ({scriptPhases: [{id, name: 'X', script: 'echo'}]}))],
+        ctx,
+      );
+      expect(res.scriptPhases).toEqual([
+        {id, name: 'X', script: 'echo', position: 'end'},
+      ]);
+    },
+  );
+
+  it('defaults scriptPhases to [] when no plugin declares any', () => {
+    const res = invokePlugins([mk('a', () => ({}))], ctx);
+    expect(res.scriptPhases).toEqual([]);
+  });
+
+  it('rejects a non-array scriptPhases declaration', () => {
+    expect(() =>
+      invokePlugins(
+        [mk('expo', () => ({scriptPhases: {id: 'x', name: 'X', script: 'y'}}))],
+        ctx,
+      ),
+    ).toThrow(/non-array scriptPhases/);
+  });
+
+  it.each([
+    ['missing id', {name: 'X', script: 'echo'}],
+    ['empty id', {id: '', name: 'X', script: 'echo'}],
+    ['non-string id', {id: 7, name: 'X', script: 'echo'}],
+    ['an id containing a space', {id: 'a b', name: 'X', script: 'echo'}],
+    // `:` is excluded so the `plugin:<id>` UUID seed stays unambiguous.
+    ['an id containing a colon', {id: 'expo:phase', name: 'X', script: 'echo'}],
+    ['missing name', {id: 'a', script: 'echo'}],
+    ['empty name', {id: 'a', name: '', script: 'echo'}],
+    ['missing script', {id: 'a', name: 'X'}],
+    ['empty script', {id: 'a', name: 'X', script: ''}],
+    [
+      'unknown position',
+      {id: 'a', name: 'X', script: 'echo', position: 'afterLink'},
+    ],
+    [
+      'non-array inputPaths',
+      {id: 'a', name: 'X', script: 'echo', inputPaths: '/in'},
+    ],
+    [
+      'non-string inputPaths entry',
+      {id: 'a', name: 'X', script: 'echo', inputPaths: [7]},
+    ],
+    [
+      'empty inputPaths entry',
+      {id: 'a', name: 'X', script: 'echo', inputPaths: ['']},
+    ],
+    [
+      'non-array outputPaths',
+      {id: 'a', name: 'X', script: 'echo', outputPaths: '/out'},
+    ],
+    [
+      'non-string outputPaths entry',
+      {id: 'a', name: 'X', script: 'echo', outputPaths: [null]},
+    ],
+    [
+      'non-boolean alwaysOutOfDate',
+      {id: 'a', name: 'X', script: 'echo', alwaysOutOfDate: 'yes'},
+    ],
+    ['null entry', null],
+    ['a number instead of an entry', 42],
+    ['a string instead of an entry', 'echo'],
+    ['the reserved id __proto__', {id: '__proto__', name: 'X', script: 'echo'}],
+    [
+      'the reserved id constructor',
+      {id: 'constructor', name: 'X', script: 'echo'},
+    ],
+    ['the reserved id prototype', {id: 'prototype', name: 'X', script: 'echo'}],
+  ])('rejects a scriptPhase with %s', (_label, entry) => {
+    expect(() =>
+      invokePlugins([mk('expo', () => ({scriptPhases: [entry]}))], ctx),
+    ).toThrow(/invalid scriptPhase/);
+  });
+
+  it('names the offending id in the invalid-scriptPhase error', () => {
+    expect(() =>
+      invokePlugins(
+        [
+          mk('expo', () => ({
+            scriptPhases: [
+              {id: 'ok.phase', name: 'Fine', script: 'echo'},
+              {id: 'bad:phase', name: 'Bad', script: 'echo'},
+            ],
+          })),
+        ],
+        ctx,
+      ),
+    ).toThrow(/invalid scriptPhase 'bad:phase'/);
+  });
+
+  it('rejects a duplicate scriptPhase id within a single plugin', () => {
+    expect(() =>
+      invokePlugins(
+        [
+          mk('expo', () => ({
+            scriptPhases: [
+              {id: 'dup.phase', name: 'One', script: 'echo one'},
+              {id: 'dup.phase', name: 'Two', script: 'echo two'},
+            ],
+          })),
+        ],
+        ctx,
+      ),
+    ).toThrow(/duplicate script phase id 'dup\.phase'/);
+  });
+
+  it('rejects a duplicate scriptPhase id across plugins, naming it', () => {
+    const phase = () => ({id: 'dup.phase', name: 'Dup', script: 'echo'});
+    expect(() =>
+      invokePlugins(
+        [
+          mk('a', () => ({scriptPhases: [phase()]})),
+          mk('b', () => ({scriptPhases: [phase()]})),
+        ],
+        ctx,
+      ),
+    ).toThrow(/duplicate script phase id 'dup\.phase'/);
+  });
+
+  // A line break is the one thing an Xcode phase display name can never carry.
+  // Every other hostile character is safe by construction: the injector
+  // normalizes the name for the `/* … */` comments and escapes it in the `name`
+  // field, so nothing structural reaches the project text.
+  it.each([
+    ['a newline', 'Line one\nLine two'],
+    ['a carriage return', 'Line one\rLine two'],
+  ])('rejects a scriptPhase name containing %s', (_label, name) => {
+    expect(() =>
+      invokePlugins(
+        [
+          mk('expo', () => ({
+            scriptPhases: [{id: 'expo.phase', name, script: 'echo'}],
+          })),
+        ],
+        ctx,
+      ),
+    ).toThrow(/invalid scriptPhase name for 'expo\.phase'/);
+  });
+
+  it.each([
+    ['pbxproj quoting', 'Bundle "app.config"'],
+    ['a comment terminator', 'Bad */ = { x'],
+    ['a comment opener', 'Bad /* opener'],
+  ])('keeps a scriptPhase name needing %s verbatim', (_label, name) => {
+    const res = invokePlugins(
+      [
+        mk('expo', () => ({
+          scriptPhases: [{id: 'expo.phase', name, script: 'echo'}],
+        })),
+      ],
+      ctx,
+    );
+    expect(res.scriptPhases[0].name).toBe(name);
   });
 });

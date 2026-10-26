@@ -7,8 +7,9 @@
 
 #pragma once
 
-#include <react/renderer/graphics/Rect.h>
-#include <react/renderer/graphics/Transform.h>
+#include <react/cxxstableapi/PrivateGuard.h>
+
+#include <React/Graphics.h>
 
 namespace facebook::react {
 

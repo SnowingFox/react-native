@@ -468,6 +468,7 @@ describe('VirtualizedList', () => {
 
     const instance = component.getInstance();
 
+    simulateViewportLayout(component, {width: 300, height: 600});
     instance._onScrollBeginDrag({nativeEvent});
     instance._onScroll({
       timeStamp: 1000,
@@ -502,6 +503,56 @@ describe('VirtualizedList', () => {
         viewableItems: [expect.objectContaining({isViewable: true, key: 'i4'})],
       }),
     );
+  });
+
+  it('does not report viewable items when scroll metrics have an empty cross-axis viewport', async () => {
+    const data = [{key: 'i1'}, {key: 'i2'}, {key: 'i3'}];
+    const onViewableItemsChanged = jest.fn();
+    let component;
+
+    await act(() => {
+      component = create(
+        <VirtualizedList
+          data={data}
+          getItem={(items, index) => items[index]}
+          getItemCount={items => items.length}
+          getItemLayout={(items, index) => ({
+            index,
+            length: 100,
+            offset: index * 100,
+          })}
+          horizontal={true}
+          onViewableItemsChanged={onViewableItemsChanged}
+          renderItem={({item}) => <item value={item.key} />}
+        />,
+      );
+    });
+
+    component.getInstance()._onScroll({
+      timeStamp: 1000,
+      nativeEvent: {
+        contentInset: {bottom: 0, left: 0, right: 0, top: 0},
+        contentOffset: {x: 0, y: 0},
+        contentSize: {width: 300, height: 0},
+        layoutMeasurement: {width: 300, height: 0},
+        zoomScale: 1,
+      },
+    });
+
+    expect(onViewableItemsChanged).not.toHaveBeenCalled();
+
+    component.getInstance()._onScroll({
+      timeStamp: 2000,
+      nativeEvent: {
+        contentInset: {bottom: 0, left: 0, right: 0, top: 0},
+        contentOffset: {x: 0, y: 0},
+        contentSize: {width: 300, height: 100},
+        layoutMeasurement: {width: 300, height: 100},
+        zoomScale: 1,
+      },
+    });
+
+    expect(onViewableItemsChanged).toHaveBeenCalledTimes(1);
   });
 
   it('getScrollRef for case where it returns a ScrollView', async () => {
@@ -999,6 +1050,49 @@ describe('VirtualizedList', () => {
     // coordinates. This is because they will remain rendered even once
     // scrolled-past in layout space.
     expect(component).toMatchSnapshot();
+  });
+
+  it('does not forward stickyHeaderIndices when the prop is absent', async () => {
+    let scrollProps;
+    await act(() => {
+      create(
+        <VirtualizedList
+          ListHeaderComponent={() => createElement('Header')}
+          data={[{key: 'i1'}, {key: 'i2'}]}
+          renderItem={({item}) => <item value={item.key} />}
+          getItem={(data, index) => data[index]}
+          getItemCount={data => data.length}
+          renderScrollComponent={props => {
+            scrollProps = props;
+            return createElement('MockScrollView', props);
+          }}
+        />,
+      );
+    });
+    expect(scrollProps).not.toBe(undefined);
+    expect(scrollProps.stickyHeaderIndices).toEqual([]);
+  });
+
+  it('forwards stickyHeaderIndices including the header index when provided', async () => {
+    let scrollProps;
+    await act(() => {
+      create(
+        <VirtualizedList
+          ListHeaderComponent={() => createElement('Header')}
+          data={[{key: 'i1'}, {key: 'i2'}]}
+          renderItem={({item}) => <item value={item.key} />}
+          getItem={(data, index) => data[index]}
+          getItemCount={data => data.length}
+          stickyHeaderIndices={[0]}
+          renderScrollComponent={props => {
+            scrollProps = props;
+            return createElement('MockScrollView', props);
+          }}
+        />,
+      );
+    });
+    expect(scrollProps).not.toBe(undefined);
+    expect(scrollProps.stickyHeaderIndices).toEqual([0]);
   });
 
   it('does not add a sticky header to the render mask when no sticky headers are configured', () => {
@@ -2181,6 +2275,47 @@ it('renders windowSize derived region at top', async () => {
   expect(component).toMatchSnapshot();
 });
 
+it('does not update state on a scroll that keeps the render window', async () => {
+  const items = generateItems(10);
+  const ITEM_HEIGHT = 10;
+
+  let component;
+  await act(() => {
+    component = create(
+      <VirtualizedList
+        initialNumToRender={1}
+        maxToRenderPerBatch={1}
+        windowSize={3}
+        {...baseItemProps(items)}
+        {...fixedHeightItemLayoutProps(ITEM_HEIGHT)}
+      />,
+    );
+  });
+
+  await act(() => {
+    simulateLayout(component, {
+      viewport: {width: 10, height: 20},
+      content: {width: 10, height: 100},
+    });
+    performAllBatches();
+  });
+
+  await act(() => {
+    jest.runAllTimers();
+  });
+
+  const setStateSpy = jest.spyOn(component.getInstance(), 'setState');
+
+  // The window already covers the viewport at the top and the 20 dip below
+  // it, so a scroll back to the top doesn't change it.
+  await act(() => {
+    simulateScroll(component, {x: 0, y: 0});
+    jest.runAllTimers();
+  });
+
+  expect(setStateSpy).not.toHaveBeenCalled();
+});
+
 it('renders windowSize derived region in middle', async () => {
   const items = generateItems(10);
   const ITEM_HEIGHT = 10;
@@ -2875,6 +3010,163 @@ it('maintainVisibleContentPosition with inverted VirtualizedList handles prepend
     component.getInstance().state.cellsAroundViewport.first;
   expect(anchorAfterPrepend).toBeGreaterThanOrEqual(anchorBeforePrepend);
   expect(anchorAfterPrepend).toBeLessThanOrEqual(anchorBeforePrepend + 10);
+});
+
+it('handles rapid prepends with coalesced scroll event (regression for #53542)', async () => {
+  const items = generateItems(20);
+  const ITEM_HEIGHT = 10;
+
+  let component;
+  await act(() => {
+    component = create(
+      <VirtualizedList
+        initialNumToRender={1}
+        windowSize={1}
+        maintainVisibleContentPosition={{minIndexForVisible: 0}}
+        {...baseItemProps(items)}
+        {...fixedHeightItemLayoutProps(ITEM_HEIGHT)}
+      />,
+    );
+  });
+
+  await act(() => {
+    simulateLayout(component, {
+      viewport: {width: 10, height: 50},
+      content: {width: 10, height: items.length * ITEM_HEIGHT},
+    });
+    simulateScroll(component, {x: 0, y: 50});
+    performAllBatches();
+  });
+
+  const afterFirstPrepend = [...generateItems(5, items.length), ...items];
+  const afterSecondPrepend = [
+    ...generateItems(3, afterFirstPrepend.length),
+    ...afterFirstPrepend,
+  ];
+
+  // Two rapid prepends WITHOUT intermediate scroll (coalesced native event)
+  await act(() => {
+    component.update(
+      <VirtualizedList
+        initialNumToRender={1}
+        windowSize={1}
+        maintainVisibleContentPosition={{minIndexForVisible: 0}}
+        {...baseItemProps(afterFirstPrepend)}
+        {...fixedHeightItemLayoutProps(ITEM_HEIGHT)}
+      />,
+    );
+  });
+
+  await act(() => {
+    component.update(
+      <VirtualizedList
+        initialNumToRender={1}
+        windowSize={1}
+        maintainVisibleContentPosition={{minIndexForVisible: 0}}
+        {...baseItemProps(afterSecondPrepend)}
+        {...fixedHeightItemLayoutProps(ITEM_HEIGHT)}
+      />,
+    );
+  });
+
+  // Only ONE coalesced scroll event for both prepends (delta 8*ITEM_HEIGHT)
+  // This simulates EventQueue coalescing: dispatchUniqueEvent replaces previous scroll
+  // Previously: pending 0→1→2, scroll 2→1 (still blocked). Now: 0→1→1→0 (unblocked)
+  await act(() => {
+    simulateContentLayout(component, {
+      width: 10,
+      height: afterSecondPrepend.length * ITEM_HEIGHT,
+    });
+    simulateScroll(component, {x: 0, y: 50 + 8 * ITEM_HEIGHT});
+    performAllBatches();
+  });
+
+  // Pending should be 0, not 1 – this fails on main before fix
+  expect(component.getInstance().state.pendingScrollUpdateCount).toBe(0);
+  expect(component.getInstance().state.firstVisibleItemKey).not.toBeNull();
+  expect(
+    component.getInstance().state.cellsAroundViewport.first,
+  ).toBeGreaterThanOrEqual(0);
+});
+
+it('renders all cells after being hidden and revealed by Suspense with a pending batch update', async () => {
+  const ITEM_HEIGHT = 40;
+  const listRef = createRef();
+  // The simulate* helpers only need `getInstance()`; the root here is a
+  // Suspense boundary, so point them at the list instance via the ref.
+  const list = {getInstance: () => listRef.current};
+
+  // Mirrors react-freeze (react-native-screens `freezeOnBlur`): suspend on a
+  // promise that never resolves so React hides the already-mounted subtree
+  // (componentWillUnmount) and later reveals the same instance
+  // (componentDidMount) instead of remounting it.
+  const neverResolves = new Promise(() => {});
+  function Freeze({freeze, children}) {
+    if (freeze) {
+      throw neverResolves;
+    }
+    return children;
+  }
+
+  const renderList = ({freeze, items}) => (
+    <React.Suspense fallback={null}>
+      <Freeze freeze={freeze}>
+        <VirtualizedList
+          ref={listRef}
+          initialNumToRender={12}
+          {...baseItemProps(items)}
+          {...fixedHeightItemLayoutProps(ITEM_HEIGHT)}
+        />
+      </Freeze>
+    </React.Suspense>
+  );
+
+  let component;
+  await act(() => {
+    component = create(renderList({freeze: false, items: []}), {
+      unstable_isConcurrent: true,
+    });
+  });
+
+  // Layout with no data schedules a low-priority batch update. Leave the
+  // timer pending so it is still outstanding when the list is hidden.
+  await act(() => {
+    simulateLayout(list, {
+      viewport: {width: 300, height: 600},
+      content: {width: 300, height: 0},
+    });
+  });
+
+  await act(() => {
+    component.update(renderList({freeze: true, items: []}));
+  });
+  await act(() => {
+    component.update(renderList({freeze: false, items: []}));
+  });
+
+  const items = generateItems(28);
+  await act(() => {
+    component.update(renderList({freeze: false, items}));
+  });
+  await act(() => {
+    simulateContentLayout(list, {
+      width: 300,
+      height: items.length * ITEM_HEIGHT,
+    });
+    simulateScroll(list, {x: 0, y: 0});
+  });
+
+  // Each low-priority batch grows the render window by at most
+  // `maxToRenderPerBatch` cells, so advance through several batching periods.
+  for (let i = 0; i < 5; i++) {
+    await act(() => {
+      performAllBatches();
+    });
+  }
+
+  expect(component.root.findAllByType('MockCellItem')).toHaveLength(
+    items.length,
+  );
 });
 
 function generateItems(count, startKey = 0) {

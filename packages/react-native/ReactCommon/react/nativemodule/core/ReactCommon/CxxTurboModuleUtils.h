@@ -7,7 +7,9 @@
 
 #pragma once
 
-#include <ReactCommon/CallInvoker.h>
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
+#include <React/CallInvoker.h>
 #include <ReactCommon/TurboModule.h>
 #include <functional>
 #include <memory>

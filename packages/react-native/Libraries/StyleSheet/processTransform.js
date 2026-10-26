@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @flow
+ * @flow strict-local
  * @format
  */
 
@@ -12,6 +12,9 @@
 
 const stringifySafe = require('../Utilities/stringifySafe').default;
 const invariant = require('invariant');
+
+type TransformObject = {[string]: unknown, ...};
+type TransformArray = Array<TransformObject>;
 
 /**
  * Generate a transform matrix based on the provided transforms, and use that
@@ -21,12 +24,11 @@ const invariant = require('invariant');
  * be applied in an arbitrary order, and yet have a universal, singular
  * interface to native code.
  */
-function processTransform(
-  transform: Array<Object> | string,
-): Array<Object> | Array<number> {
+function processTransform(transform: TransformArray | string): TransformArray {
+  let normalizedTransform;
   if (typeof transform === 'string') {
     const regex = new RegExp(/(\w+)\(([^)]+)\)/g);
-    const transformArray: Array<Object> = [];
+    const transformArray: TransformArray = [];
     let matches;
 
     while ((matches = regex.exec(transform))) {
@@ -39,14 +41,16 @@ function processTransform(
         transformArray.push({[key]: value});
       }
     }
-    transform = transformArray;
+    normalizedTransform = transformArray;
+  } else {
+    normalizedTransform = transform;
   }
 
   if (__DEV__) {
-    _validateTransforms(transform);
+    _validateTransforms(normalizedTransform);
   }
 
-  return transform;
+  return normalizedTransform;
 }
 
 const _getKeyAndValueFromCSSTransform: (
@@ -56,11 +60,16 @@ const _getKeyAndValueFromCSSTransform: (
   key,
   args,
 ) => {
-  const argsWithUnitsRegex = new RegExp(/([+-]?\d+(\.\d+)?)([a-zA-Z]+|%)?/g);
+  const argsWithUnitsRegex = new RegExp(
+    /([+-]?(?:\d+(?:\.\d*)?|\.\d+))([a-zA-Z]+|%)?/g,
+  );
 
   switch (key) {
     case 'matrix':
-      return {key, value: args.match(/[+-]?\d+(\.\d+)?/g)?.map(Number)};
+      return {
+        key,
+        value: args.match(/[+-]?(?:\d+(?:\.\d*)?|\.\d+)/g)?.map(Number),
+      };
     case 'translate':
     case 'translate3d':
       const parsedArgs = [];
@@ -69,7 +78,7 @@ const _getKeyAndValueFromCSSTransform: (
       let matches;
       while ((matches = argsWithUnitsRegex.exec(args))) {
         const value = Number(matches[1]);
-        const unitOfMeasurement = matches[3];
+        const unitOfMeasurement = matches[2];
 
         if (value !== 0 && !unitOfMeasurement) {
           missingUnitOfMeasurement = true;
@@ -121,7 +130,7 @@ const _getKeyAndValueFromCSSTransform: (
       }
 
       const value = Number(argMatches[1]);
-      const unitOfMeasurement = argMatches[3];
+      const unitOfMeasurement = argMatches[2];
 
       if (__DEV__) {
         invariant(
@@ -131,14 +140,23 @@ const _getKeyAndValueFromCSSTransform: (
         );
       }
 
-      return {key, value};
+      // The percentage unit is meaningful for translations, so keep it in the
+      // value instead of dropping it. A bare number is interpreted as points.
+      return {
+        key,
+        value:
+          unitOfMeasurement === '%' &&
+          (key === 'translateX' || key === 'translateY')
+            ? `${value}%`
+            : value,
+      };
 
     default:
       return {key, value: !isNaN(args) ? Number(args) : args};
   }
 };
 
-function _validateTransforms(transform: Array<Object>): void {
+function _validateTransforms(transform: TransformArray): void {
   transform.forEach(transformation => {
     const keys = Object.keys(transformation);
     invariant(
@@ -160,11 +178,16 @@ function _validateTransforms(transform: Array<Object>): void {
 
 function _validateTransform(
   key: string,
-  value: any | number | string,
-  transformation: any,
+  value: unknown,
+  transformation: TransformObject,
 ) {
+  const isAnimatedValue =
+    value != null &&
+    typeof value === 'object' &&
+    'getValue' in value &&
+    typeof value.getValue === 'function';
   invariant(
-    !value.getValue,
+    !isAnimatedValue,
     'You passed an Animated.Value to a normal component. ' +
       'You need to wrap that component in an Animated. For example, ' +
       'replace <View /> by <Animated.View />.',
@@ -182,23 +205,29 @@ function _validateTransform(
   switch (key) {
     case 'matrix':
       invariant(
+        Array.isArray(value),
+        'Transform with key of %s must have an array as the value: %s',
+        key,
+        stringifySafe(transformation),
+      );
+      invariant(
         value.length === 9 || value.length === 16,
         'Matrix transform must have a length of 9 (2d) or 16 (3d). ' +
           'Provided matrix has a length of %s: %s',
-        /* $FlowFixMe[prop-missing] (>=0.84.0 site=react_native_fb) This
-         * comment suppresses an error found when Flow v0.84 was deployed. To
-         * see the error, delete this comment and run Flow. */
         value.length,
         stringifySafe(transformation),
       );
       break;
     case 'translate':
       invariant(
+        Array.isArray(value),
+        'Transform with key of %s must have an array as the value: %s',
+        key,
+        stringifySafe(transformation),
+      );
+      invariant(
         value.length === 2 || value.length === 3,
         'Transform with key translate must be an array of length 2 or 3, found %s: %s',
-        /* $FlowFixMe[prop-missing] (>=0.84.0 site=react_native_fb) This
-         * comment suppresses an error found when Flow v0.84 was deployed. To
-         * see the error, delete this comment and run Flow. */
         value.length,
         stringifySafe(transformation),
       );

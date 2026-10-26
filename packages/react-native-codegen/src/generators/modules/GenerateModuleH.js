@@ -40,6 +40,7 @@ const {
   getModules,
   isArrayRecursiveMember,
   isDirectRecursiveMember,
+  throwIfUnsupportedEventEmitterPayload,
 } = require('./Utils');
 
 type FilesOutput = Map<string, string>;
@@ -211,8 +212,8 @@ const FileTemplate = ({
 
 #pragma once
 
-#include <ReactCommon/TurboModule.h>
-#include <react/bridging/Bridging.h>
+#include <React/Bridging.h>
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 
@@ -638,6 +639,11 @@ function translateEventEmitterToCpp(
   resolveAlias: AliasResolver,
   enumMap: NativeModuleEnumMap,
 ): EventEmitterCpp {
+  throwIfUnsupportedEventEmitterPayload(
+    eventEmitter.name,
+    eventEmitter.typeAnnotation.typeAnnotation,
+  );
+
   const isVoidTypeAnnotation =
     eventEmitter.typeAnnotation.typeAnnotation.type === 'VoidTypeAnnotation';
   const templateName = `${toPascalCase(eventEmitter.name)}Type`;

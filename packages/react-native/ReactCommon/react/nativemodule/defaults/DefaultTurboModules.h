@@ -5,7 +5,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include <ReactCommon/TurboModule.h>
+#pragma once
+
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/NativeModuleCore.h>
 
 namespace facebook::react {
 

@@ -5,13 +5,15 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
 /*
  * Adapted from react-native-windows under the MIT license.
  */
 
 #pragma once
 
-#include <react/debug/flags.h>
+#include <React/Debug.h>
 #include <react/renderer/animated/NativeAnimatedNodesManager.h>
 
 namespace facebook::react {

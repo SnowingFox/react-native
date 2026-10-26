@@ -141,8 +141,21 @@ function parseArgs(argv /*: Array<string> */) /*: DownloadArgs */ {
 const MAVEN_CENTRAL_REPOSITORY = 'https://repo1.maven.org/maven2';
 const REACT_NATIVE_MAVEN_MIRROR_REPOSITORY =
   'https://repo.reactnative.dev/maven2';
+const UNPUBLISHED_MAVEN_VERSION = '1000.0.0';
 const MAVEN_SNAPSHOT =
   'https://central.sonatype.com/repository/maven-snapshots';
+
+function isMavenArtifactVersionPublished(version /*: string */) /*: boolean */ {
+  // 1000.0.0 identifies a source checkout on main and is never published to Maven.
+  return version !== UNPUBLISHED_MAVEN_VERSION;
+}
+
+function isMavenArtifactUrlPublished(url /*: string */) /*: boolean */ {
+  return (
+    !url.includes(`/${UNPUBLISHED_MAVEN_VERSION}/`) &&
+    !url.includes(`/${UNPUBLISHED_MAVEN_VERSION}-SNAPSHOT/`)
+  );
+}
 
 /**
  * The mirror is ON unless RCT_REACT_NATIVE_MAVEN_MIRROR_ENABLED is
@@ -219,6 +232,12 @@ async function resolveSnapshotUrl(
   coordinate /*: string */,
   artifactName /*: string */,
 ) /*: Promise<string> */ {
+  if (!isMavenArtifactVersionPublished(version)) {
+    throw new Error(
+      `Maven artifacts are not published for the development version ${version}`,
+    );
+  }
+
   const metadataUrl =
     `${MAVEN_SNAPSHOT}/com/facebook/${subGroup}/${coordinate}/` +
     `${version}-SNAPSHOT/maven-metadata.xml`;
@@ -353,6 +372,10 @@ async function resolveLatestV1Version() /*: Promise<string> */ {
 }
 
 async function exists(url /*: string */) /*: Promise<boolean> */ {
+  if (!isMavenArtifactUrlPublished(url)) {
+    return false;
+  }
+
   try {
     // $FlowFixMe[incompatible-call] global fetch not in Flow stubs
     const res = await fetch(url, {method: 'HEAD'});
@@ -453,14 +476,61 @@ async function resolveRNDepsArtifact(
 }
 
 /**
+ * Resolves the `hermes-compiler` npm package's version from THIS project's own
+ * node_modules — the same lookup react-native-xcode.sh falls back to for
+ * SwiftPM builds to find the hermesc binary that compiles the JS bundle.
+ * Returns null when the package isn't resolvable (e.g.
+ * USE_HERMES=false apps that never installed it) so the caller can fall back
+ * to the npm dist-tag lookup.
+ */
+function resolveLocalHermesCompilerVersion(
+  rnRoot /*: string */,
+) /*: string | null */ {
+  try {
+    const pkgPath = require.resolve('hermes-compiler/package.json', {
+      paths: [rnRoot],
+    });
+    // $FlowFixMe[incompatible-type] JSON.parse returns any
+    const pkg /*: {version: string} */ = JSON.parse(
+      fs.readFileSync(pkgPath, 'utf8'),
+    );
+    assertSafeVersion(pkg.version, 'local hermes-compiler/package.json');
+    return pkg.version;
+  } catch (error) {
+    // A MODULE_NOT_FOUND resolution failure is the expected case (e.g.
+    // USE_HERMES=false apps that never installed hermes-compiler) — fall back
+    // silently. Any other failure means hermes-compiler IS installed but its
+    // package.json is unreadable/malformed or carries an unsafe version; warn
+    // loudly rather than silently regressing to the live latest-v1 dist-tag,
+    // which would re-introduce the version-skew crash this resolves (#57917).
+    if (error.code !== 'MODULE_NOT_FOUND') {
+      log(
+        `  WARNING: hermes-compiler is installed but its version could not be resolved (${error.message}); falling back to the latest-v1 dist-tag, which may not match the pinned hermesc and can crash at launch with "Wrong bytecode version".`,
+      );
+    }
+    return null;
+  }
+}
+
+/**
  * Returns {url, version} for Hermes. Hermes uses its own version space
  * decoupled from React Native's nightly cadence — RN's `hermes-compiler`
  * npm package publishes a `latest-v1` dist-tag that always resolves to a
- * binary that's been built and uploaded to Maven. Our default mirrors RN's
- * CocoaPods prebuild path (see scripts/ios-prebuild/hermes.js):
+ * binary that's been built and uploaded to Maven.
  *
- *   HERMES_VERSION unset       → 'latest-v1' dist-tag
- *   HERMES_VERSION=latest-v1   → same (explicit)
+ *   HERMES_VERSION unset       → version pinned by the locally installed
+ *                                hermes-compiler package (node_modules).
+ *                                This is the SAME source
+ *                                react-native-xcode.sh resolves hermesc
+ *                                from, so the downloaded VM and
+ *                                the hermesc that compiles the JS bundle
+ *                                always agree — a mismatched pair crashes at
+ *                                launch with "Wrong bytecode version" (#57917).
+ *                                Falls back to the 'latest-v1' npm dist-tag
+ *                                (RN's CocoaPods prebuild default; see
+ *                                scripts/ios-prebuild/hermes.js) only when
+ *                                hermes-compiler isn't locally resolvable.
+ *   HERMES_VERSION=latest-v1   → 'latest-v1' dist-tag (explicit)
  *   HERMES_VERSION=nightly     → hermes-compiler@nightly dist-tag
  *   HERMES_VERSION=<literal>   → use that version verbatim
  *
@@ -472,8 +542,17 @@ async function resolveHermesArtifact(
   rnVersion /*: string */,
   flavor /*: string */,
   rawVersion /*: string | null */,
+  rnRoot /*: string */,
 ) /*: Promise<ResolvedArtifact> */ {
-  let version = process.env.HERMES_VERSION ?? 'latest-v1';
+  let version = process.env.HERMES_VERSION;
+
+  if (version == null) {
+    const localVersion = resolveLocalHermesCompilerVersion(rnRoot);
+    if (localVersion != null) {
+      log(`  Using locally pinned hermes-compiler: ${localVersion}`);
+    }
+    version = localVersion ?? 'latest-v1';
+  }
 
   if (version === 'nightly') {
     version = await resolveNightlyVersion('hermes-compiler');
@@ -561,16 +640,26 @@ function createProgressDisplay(
 type ProgressCallback = (label: string, downloaded: number, total: number, speed: number, done: boolean, elapsed: number) => void;
 */
 
-async function download(
+const DOWNLOAD_MAX_ATTEMPTS = 3;
+const DOWNLOAD_RETRY_BASE_DELAY_MS = 1000;
+const DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
+
+function isRetryableDownloadError(error /*: Error */) /*: boolean */ {
+  // Client errors are deterministic except for request timeout / rate limiting.
+  // Network and stream errors do not carry an HTTP prefix and are safe to retry.
+  const httpStatus = /^HTTP (\d{3})\b/.exec(error.message)?.[1];
+  if (httpStatus == null) {
+    return true;
+  }
+  const status = Number(httpStatus);
+  return status === 408 || status === 429 || status >= 500;
+}
+
+async function downloadOnce(
   url /*: string */,
   destPath /*: string */,
   onProgress /*:: ?: ProgressCallback */,
 ) /*: Promise<void> */ {
-  if (fs.existsSync(destPath)) {
-    log(`  Already cached: ${path.basename(destPath)}`);
-    return;
-  }
-
   const tmpPath = destPath + '.download';
   try {
     // $FlowFixMe[incompatible-call] global fetch not in Flow stubs
@@ -583,6 +672,7 @@ async function download(
     let downloadedBytes = 0;
     let lastPrintTime = Date.now();
     let lastPrintBytes = 0;
+    let lastDataTime = Date.now();
     const startTime = Date.now();
 
     const fileStream = fs.createWriteStream(tmpPath);
@@ -640,14 +730,25 @@ async function download(
       await new Promise((resolve, reject) => {
         let progressInterval;
         try {
-          progressInterval = setInterval(() => reportProgress(), 500);
+          progressInterval = setInterval(() => {
+            reportProgress();
+            if (Date.now() - lastDataTime >= DOWNLOAD_IDLE_TIMEOUT_MS) {
+              nodeReadable.destroy(
+                new Error(
+                  `Download made no progress for ${DOWNLOAD_IDLE_TIMEOUT_MS / 1000}s: ${url}`,
+                ),
+              );
+            }
+          }, 500);
 
           nodeReadable
             .on('data', chunk => {
               downloadedBytes += chunk.length;
+              lastDataTime = Date.now();
             })
             .on('error', err => {
               clearInterval(progressInterval);
+              fileStream.destroy();
               reject(err);
             })
             .pipe(fileStream)
@@ -658,10 +759,13 @@ async function download(
             })
             .on('error', err => {
               clearInterval(progressInterval);
+              nodeReadable.destroy();
               reject(err);
             });
         } catch (err) {
           if (progressInterval != null) clearInterval(progressInterval);
+          nodeReadable.destroy();
+          fileStream.destroy();
           reject(err);
         }
       });
@@ -674,13 +778,44 @@ async function download(
 
     fs.renameSync(tmpPath, destPath);
   } catch (err) {
-    // Clean up partial .download temp file on failure
+    // Clean up partial .download temp file on failure.
     try {
       fs.unlinkSync(tmpPath);
     } catch {
       // temp file may not exist yet
     }
     throw err;
+  }
+}
+
+async function download(
+  url /*: string */,
+  destPath /*: string */,
+  onProgress /*:: ?: ProgressCallback */,
+) /*: Promise<void> */ {
+  if (fs.existsSync(destPath)) {
+    log(`  Already cached: ${path.basename(destPath)}`);
+    return;
+  }
+
+  for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt++) {
+    try {
+      await downloadOnce(url, destPath, onProgress);
+      return;
+    } catch (error) {
+      if (
+        attempt === DOWNLOAD_MAX_ATTEMPTS ||
+        !isRetryableDownloadError(error)
+      ) {
+        throw error;
+      }
+      const delayMs = DOWNLOAD_RETRY_BASE_DELAY_MS * attempt;
+      warn(
+        `  Download failed (${error.message}); retrying in ${delayMs}ms ` +
+          `(attempt ${attempt + 1}/${DOWNLOAD_MAX_ATTEMPTS})`,
+      );
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
   }
 }
 
@@ -1178,7 +1313,7 @@ async function main(argv /*:: ?: Array<string> */) /*: Promise<void> */ {
       label: 'hermes',
       name: 'hermes-engine',
       resolve: () =>
-        resolveHermesArtifact(resolvedRnVersion, flavor, rawVersion),
+        resolveHermesArtifact(resolvedRnVersion, flavor, rawVersion, rnRoot),
       sharedName: (v /*: string */) => `hermes-ios-${v}-${flavor}.tar.gz`,
     },
   ];
@@ -1449,10 +1584,12 @@ module.exports = {
   main,
   resolveCacheSlotVersion,
   resolveHermesArtifact,
+  resolveLocalHermesCompilerVersion,
   REQUIRED_ARTIFACTS,
   validateArtifactsCache,
   // Exposed for unit tests (pure / fetch-stubbable helpers).
   mavenRepositoryUrls,
+  isMavenArtifactVersionPublished,
   reactNativeMavenMirrorEnabled,
   rnCoreReleaseUrls,
   rnDepsReleaseUrls,
@@ -1463,6 +1600,7 @@ module.exports = {
   resolveLatestV1Version,
   resolveRNCoreArtifact,
   resolveRNDepsArtifact,
+  download,
   exists,
   formatBytes,
   formatSpeed,

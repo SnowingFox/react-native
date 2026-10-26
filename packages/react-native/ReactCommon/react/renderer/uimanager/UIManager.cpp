@@ -11,13 +11,17 @@
 #include <cxxreact/TraceSection.h>
 #include <react/debug/react_native_assert.h>
 #include <react/featureflags/ReactNativeFeatureFlags.h>
+#include <react/renderer/consistency/ShadowTreeRevisionConsistencyManager.h>
 #include <react/renderer/core/DynamicPropsUtilities.h>
 #include <react/renderer/core/PropsParserContext.h>
 #include <react/renderer/core/ShadowNodeFragment.h>
+#include <react/renderer/leakchecker/LeakChecker.h>
 #include <react/renderer/uimanager/AppRegistryBinding.h>
 #include <react/renderer/uimanager/UIManagerBinding.h>
 #include <react/renderer/uimanager/UIManagerCommitHook.h>
 #include <react/renderer/uimanager/UIManagerMountHook.h>
+#include <react/renderer/uimanager/consistency/LazyShadowTreeRevisionConsistencyManager.h>
+#include <react/renderer/uimanager/consistency/ShadowTreeRevisionProvider.h>
 
 #include <glog/logging.h>
 
@@ -669,13 +673,6 @@ void UIManager::shadowTreeDidFinishReactCommit(
   }
 }
 
-void UIManager::shadowTreeDidPromoteReactRevision(
-    const ShadowTree& shadowTree) const {
-  if (delegate_ != nullptr) {
-    delegate_->uiManagerDidPromoteReactRevision(shadowTree);
-  }
-}
-
 void UIManager::shadowTreeDidCommit(
     const ShadowTree& shadowTree,
     const RootShadowNode::Shared& rootShadowNode,
@@ -769,6 +766,13 @@ void UIManager::synchronouslyUpdateViewOnUIThread(
     const folly::dynamic& props) {
   if (delegate_ != nullptr) {
     delegate_->uiManagerShouldSynchronouslyUpdateViewOnUIThread(tag, props);
+  }
+}
+
+void UIManager::synchronouslyUpdateAnimatedProps(
+    const std::unordered_map<Tag, AnimatedProps>& updates) {
+  if (delegate_ != nullptr) {
+    delegate_->uiManagerShouldSynchronouslyUpdateAnimatedProps(updates);
   }
 }
 

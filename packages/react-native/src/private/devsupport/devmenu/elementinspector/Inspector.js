@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @flow
+ * @flow strict-local
  * @format
  */
 
@@ -56,7 +56,6 @@ type ExternalInspection = {
 
 type Props = {
   inspectedViewRef: InspectedViewRef,
-  onRequestRerenderApp: () => void,
   reactDevToolsAgent?: ReactDevToolsAgent,
   devMenuInspectorOpen: boolean,
   externalInspection: ExternalInspection,
@@ -64,7 +63,6 @@ type Props = {
 
 function Inspector({
   inspectedViewRef,
-  onRequestRerenderApp,
   reactDevToolsAgent,
   devMenuInspectorOpen,
   externalInspection,
@@ -79,6 +77,7 @@ function Inspector({
   const [selectionIndex, setSelectionIndex] = useState<?number>(null);
   const [elementsHierarchy, setElementsHierarchy] =
     useState<?ElementsHierarchy>(null);
+  const touchTargeting = PressabilityDebug.useIsEnabled();
 
   // Derive inspecting state: external inspection forces it on, otherwise use local state
   const isInspecting = externalInspectingEnabled || inspectingEnabled;
@@ -160,7 +159,6 @@ function Inspector({
 
   const setTouchTargeting = (val: boolean) => {
     PressabilityDebug.setEnabled(val);
-    onRequestRerenderApp();
   };
 
   const panelContainerStyle =
@@ -188,7 +186,7 @@ function Inspector({
             hierarchy={elementsHierarchy}
             selection={selectionIndex}
             setSelection={setSelection}
-            touchTargeting={PressabilityDebug.isEnabled()}
+            touchTargeting={touchTargeting}
             setTouchTargeting={setTouchTargeting}
           />
         </SafeAreaView>

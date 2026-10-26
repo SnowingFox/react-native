@@ -42,6 +42,7 @@ import type {
 const {
   throwIfConfigNotfound,
   throwIfEventEmitterEventTypeIsUnsupported,
+  throwIfEventEmitterPayloadTypeIsUnsupported,
   throwIfEventEmitterTypeIsUnsupported,
   throwIfIncorrectModuleRegistryCallArgument,
   throwIfIncorrectModuleRegistryCallTypeParameterParserError,
@@ -82,7 +83,7 @@ export type CommandOptions = Readonly<{
 }>;
 
 // $FlowFixMe[unclear-type] TODO(T108222691): Use flow-types for @babel/parser
-type OptionsAST = Object;
+type OptionsAST = any;
 
 type ExtendedPropResult = {
   type: 'ReactNativeBuiltInType',
@@ -549,6 +550,13 @@ function buildEventEmitterSchema(
     tryParse,
     cxxOnly,
     parser,
+  );
+
+  throwIfEventEmitterPayloadTypeIsUnsupported(
+    hasteModuleName,
+    typeAnnotation.typeParameters.params[0],
+    key.name,
+    eventTypeAnnotation,
   );
 
   return {

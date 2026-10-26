@@ -19,20 +19,25 @@ bool ParagraphAttributes::operator==(const ParagraphAttributes& rhs) const {
              maximumNumberOfLines,
              ellipsizeMode,
              textBreakStrategy,
+             textWidthMode,
              adjustsFontSizeToFit,
              includeFontPadding,
              android_hyphenationFrequency,
+             lineBreak,
+             wordBreak,
              textAlignVertical) ==
       std::tie(
              rhs.maximumNumberOfLines,
              rhs.ellipsizeMode,
              rhs.textBreakStrategy,
+             rhs.textWidthMode,
              rhs.adjustsFontSizeToFit,
              rhs.includeFontPadding,
              rhs.android_hyphenationFrequency,
+             rhs.lineBreak,
+             rhs.wordBreak,
              rhs.textAlignVertical) &&
       floatEquality(minimumFontSize, rhs.minimumFontSize) &&
-      floatEquality(maximumFontSize, rhs.maximumFontSize) &&
       floatEquality(minimumFontScale, rhs.minimumFontScale);
 }
 
@@ -53,17 +58,19 @@ SharedDebugStringConvertibleList ParagraphAttributes::getDebugProps() const {
           textBreakStrategy,
           paragraphAttributes.textBreakStrategy),
       debugStringConvertibleItem(
+          "textWidthMode", textWidthMode, paragraphAttributes.textWidthMode),
+      debugStringConvertibleItem(
           "adjustsFontSizeToFit",
           adjustsFontSizeToFit,
           paragraphAttributes.adjustsFontSizeToFit),
       debugStringConvertibleItem(
+          "minimumFontScale",
+          minimumFontScale,
+          paragraphAttributes.minimumFontScale),
+      debugStringConvertibleItem(
           "minimumFontSize",
           minimumFontSize,
           paragraphAttributes.minimumFontSize),
-      debugStringConvertibleItem(
-          "maximumFontSize",
-          maximumFontSize,
-          paragraphAttributes.maximumFontSize),
       debugStringConvertibleItem(
           "includeFontPadding",
           includeFontPadding,
@@ -72,6 +79,10 @@ SharedDebugStringConvertibleList ParagraphAttributes::getDebugProps() const {
           "android_hyphenationFrequency",
           android_hyphenationFrequency,
           paragraphAttributes.android_hyphenationFrequency),
+      debugStringConvertibleItem(
+          "lineBreak", lineBreak, paragraphAttributes.lineBreak),
+      debugStringConvertibleItem(
+          "wordBreak", wordBreak, paragraphAttributes.wordBreak),
       debugStringConvertibleItem(
           "textAlignVertical",
           textAlignVertical,

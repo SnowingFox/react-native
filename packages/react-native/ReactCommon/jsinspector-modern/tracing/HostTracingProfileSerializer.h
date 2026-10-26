@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
 #include "FrameTimingSequence.h"
 #include "HostTracingProfile.h"
 #include "TraceEvent.h"

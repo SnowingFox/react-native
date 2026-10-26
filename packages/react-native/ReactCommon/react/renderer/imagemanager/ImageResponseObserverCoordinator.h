@@ -7,9 +7,11 @@
 
 #pragma once
 
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
+#include <React/Utils.h>
 #include <react/renderer/imagemanager/ImageResponse.h>
 #include <react/renderer/imagemanager/ImageResponseObserver.h>
-#include <react/utils/SharedFunction.h>
 
 #include <memory>
 #include <mutex>

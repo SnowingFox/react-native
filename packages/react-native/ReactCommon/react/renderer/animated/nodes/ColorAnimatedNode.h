@@ -5,6 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
 /*
  * Adapted from react-native-windows under the MIT license.
  */
@@ -13,7 +15,7 @@
 
 #include "AnimatedNode.h"
 
-#include <react/renderer/graphics/Color.h>
+#include <React/Graphics.h>
 
 namespace facebook::react {
 class ColorAnimatedNode final : public AnimatedNode {

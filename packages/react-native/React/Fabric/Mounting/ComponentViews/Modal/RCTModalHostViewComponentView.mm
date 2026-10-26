@@ -7,7 +7,6 @@
 
 #import "RCTModalHostViewComponentView.h"
 
-#import <React/RCTBridge+Private.h>
 #import <React/UIView+React.h>
 #import <react/renderer/components/FBReactNativeSpec/EventEmitters.h>
 #import <react/renderer/components/FBReactNativeSpec/Props.h>
@@ -158,7 +157,13 @@ static ModalHostViewEventEmitter::OnOrientationChange onOrientationChangeStruct(
                      animated:(BOOL)animated
                    completion:(void (^)(void))completion
 {
-  [modalViewController dismissViewControllerAnimated:animated completion:completion];
+  if (modalViewController.presentedViewController) {
+    // Dismissing a controller that is itself presenting only dismisses its child, so dismiss both.
+    UIViewController *presentingViewController = modalViewController.presentingViewController ?: modalViewController;
+    [presentingViewController dismissViewControllerAnimated:animated completion:completion];
+  } else {
+    [modalViewController dismissViewControllerAnimated:animated completion:completion];
+  }
 }
 
 - (void)ensurePresentedOnlyIfNeeded

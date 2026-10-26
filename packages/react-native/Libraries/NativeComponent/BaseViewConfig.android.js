@@ -204,6 +204,9 @@ const directEventTypes = {
   topLayout: {
     registrationName: 'onLayout',
   },
+  topSafeAreaInsetsChange: {
+    registrationName: 'experimental_onSafeAreaInsetsChange',
+  },
 };
 
 const validAttributesForNonEventProps = {
@@ -213,8 +216,11 @@ const validAttributesForNonEventProps = {
   transformOrigin: true,
   backgroundImage: backgroundImageAttribute,
   experimental_backgroundImage: backgroundImageAttribute,
+  backgroundSize: backgroundSizeAttribute,
   experimental_backgroundSize: backgroundSizeAttribute,
+  backgroundPosition: backgroundPositionAttribute,
   experimental_backgroundPosition: backgroundPositionAttribute,
+  backgroundRepeat: backgroundRepeatAttribute,
   experimental_backgroundRepeat: backgroundRepeatAttribute,
   boxShadow: boxShadowAttribute,
   filter: filterAttribute,
@@ -357,7 +363,6 @@ const validAttributesForNonEventProps = {
 
   // ReactViewManager @ReactProps
   accessible: true,
-  hasTVPreferredFocus: true,
   nextFocusDown: true,
   nextFocusForward: true,
   nextFocusLeft: true,
@@ -402,6 +407,7 @@ const validAttributesForNonEventProps = {
 // Props for bubbling and direct events
 const validAttributesForEventProps = {
   onLayout: true,
+  experimental_onSafeAreaInsetsChange: true,
 
   // PanResponder handlers
   onMoveShouldSetResponder: true,

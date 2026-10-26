@@ -90,7 +90,7 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
     HasChildPressedStateDelay {
 
   private companion object {
-    private val DEBUG_MODE = false && ReactBuildConfig.DEBUG
+    private val DEBUG_MODE = ReactBuildConfig.DEBUG && false
     private val TAG = ReactHorizontalScrollView::class.java.simpleName
 
     private const val NO_SCROLL_POSITION = Int.MIN_VALUE
@@ -740,7 +740,7 @@ constructor(context: Context, private val fpsListener: FpsListener? = null) :
 
     velocityHelper.calculateVelocity(ev)
     val action = ev.actionMasked
-    if (action == MotionEvent.ACTION_UP && dragging) {
+    if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) && dragging) {
       ReactScrollViewHelper.updateFabricScrollState(this)
 
       val velocityX = velocityHelper.xVelocity

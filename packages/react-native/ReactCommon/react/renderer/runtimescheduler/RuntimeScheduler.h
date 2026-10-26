@@ -7,17 +7,22 @@
 
 #pragma once
 
-#include <ReactCommon/RuntimeExecutor.h>
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/RuntimeExecutor.h>
+#include <React/Timing.h>
 #include <jsi/hermes-interfaces.h>
-#include <react/performance/timeline/PerformanceEntryReporter.h>
-#include <react/renderer/consistency/ShadowTreeRevisionConsistencyManager.h>
 #include <react/renderer/runtimescheduler/SchedulerPriorityUtils.h>
 #include <react/renderer/runtimescheduler/Task.h>
-#include <react/timing/primitives.h>
+#include <cstdint>
 #include "RuntimeSchedulerEventTimingDelegate.h"
 #include "RuntimeSchedulerIntersectionObserverDelegate.h"
+#include "RuntimeSchedulerResizeObserverDelegate.h"
 
 namespace facebook::react {
+
+class PerformanceEntryReporter;
+class ShadowTreeRevisionConsistencyManager;
 
 using RuntimeSchedulerRenderingUpdate = std::function<void()>;
 using SurfaceId = int32_t;
@@ -55,6 +60,7 @@ class RuntimeSchedulerBase : public facebook::hermes::IEventLoopControl {
   virtual void setEventTimingDelegate(RuntimeSchedulerEventTimingDelegate *eventTimingDelegate) = 0;
   virtual void setIntersectionObserverDelegate(
       RuntimeSchedulerIntersectionObserverDelegate *intersectionObserverDelegate) = 0;
+  virtual void setResizeObserverDelegate(RuntimeSchedulerResizeObserverDelegate *resizeObserverDelegate) = 0;
 };
 
 // This is a proxy for RuntimeScheduler implementation, which will be selected
@@ -166,6 +172,8 @@ class RuntimeScheduler final : public RuntimeSchedulerBase {
 
   void setIntersectionObserverDelegate(
       RuntimeSchedulerIntersectionObserverDelegate *intersectionObserverDelegate) override;
+
+  void setResizeObserverDelegate(RuntimeSchedulerResizeObserverDelegate *resizeObserverDelegate) override;
 
  private:
   // Actual implementation, stored as a unique pointer to simplify memory

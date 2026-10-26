@@ -6,7 +6,10 @@
  */
 
 #pragma once
-#include <react/renderer/components/view/BaseViewProps.h>
+
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/View.h>
 
 #include <utility>
 

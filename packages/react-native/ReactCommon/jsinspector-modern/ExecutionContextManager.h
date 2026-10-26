@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
 #include <cinttypes>
 
 namespace facebook::react::jsinspector_modern {

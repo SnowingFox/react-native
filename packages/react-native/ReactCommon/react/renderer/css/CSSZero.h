@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <optional>
 
 #include <react/renderer/css/CSSDataType.h>

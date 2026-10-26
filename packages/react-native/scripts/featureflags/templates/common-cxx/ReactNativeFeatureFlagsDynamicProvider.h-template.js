@@ -31,6 +31,8 @@ ${DO_NOT_MODIFY_COMMENT}
 
 #pragma once
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
 #include <folly/dynamic.h>
 #include <react/featureflags/ReactNativeFeatureFlagsDefaults.h>
 

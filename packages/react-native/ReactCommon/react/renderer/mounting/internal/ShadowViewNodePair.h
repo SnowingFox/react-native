@@ -7,8 +7,10 @@
 
 #pragma once
 
-#include <react/renderer/core/ShadowNode.h>
-#include <react/renderer/graphics/Point.h>
+#include <react/cxxstableapi/PrivateGuard.h>
+
+#include <React/Graphics.h>
+#include <React/RendererCore.h>
 #include <react/renderer/mounting/ShadowView.h>
 
 namespace facebook::react {

@@ -10,7 +10,8 @@
 
 'use strict';
 
-/*:: import type {
+/*:: import type {SwiftpmConfig} from './swiftpm-config';
+import type {
   AggregatorInput,
   AutolinkedDep,
   AutolinkingArgs,
@@ -19,6 +20,7 @@
   PluginFlavoredFramework,
   PluginPackageDep,
   PluginProductDep,
+  PluginScriptPhase,
   ReactDescriptor,
   RawAutolinkingJson,
   SpmModuleConfig,
@@ -58,18 +60,34 @@
 
 const {discoverPlugins, invokePlugins} = require('./autolinking-plugins');
 const {
+  SpmNameCollisionError,
+  assertSwiftNameNotReserved,
   defaultReadConfig,
+  defaultReadPodspec,
   defaultResolveDep,
   expandSpmDependencies,
 } = require('./expand-spm-dependencies');
-const {readPodspec} = require('./read-podspec');
 const {
+  MIN_IOS_VERSION_SUPPORTED,
+  sanitizeIosDeploymentTarget,
+} = require('./ios-deployment-target');
+const {findPodspecs} = require('./read-podspec');
+const {
+  AUTOLINKED_PACKAGE_NAME,
+  CXX_API_DEFINES,
+  REACT_CODEGEN_PACKAGE_NAME,
+  REACT_CODEGEN_PRODUCTS,
+  REACT_NATIVE_PACKAGE_NAME,
+  REACT_NATIVE_PRODUCTS,
   RemoteVersionError,
+  displayPath,
   findProjectRoot,
+  isValidSwiftName,
   makeLogger,
   remotePackageConfig,
-  toSwiftName,
+  swiftNameKey,
 } = require('./spm-utils');
+const {readSwiftpmConfig, stringList} = require('./swiftpm-config');
 const fs = require('node:fs');
 const path = require('node:path');
 const yargs = require('yargs');
@@ -89,7 +107,12 @@ const {log, warn} = makeLogger('generate-spm-autolinking');
 let remoteCfg /*: ?{url: string, version: string, identity: string} */ = null;
 
 function reactNativePackageLabel() /*: string */ {
-  return remoteCfg != null ? remoteCfg.identity : 'ReactNative';
+  return remoteCfg != null ? remoteCfg.identity : REACT_NATIVE_PACKAGE_NAME;
+}
+// In remote mode the RN package is labelled with the remote identity, so that
+// name is reserved for this run too.
+function reservedNamesForRun() /*: ?Array<string> */ {
+  return remoteCfg != null ? [remoteCfg.identity] : undefined;
 }
 function reactNativePackageDecl(localDecl /*: string */) /*: string */ {
   return remoteCfg != null
@@ -104,10 +127,11 @@ function reactNativePackageDecl(localDecl /*: string */) /*: string */ {
 function reactProducts() /*: Array<{name: string, package: string}> */ {
   const rn = reactNativePackageLabel();
   return [
-    {name: 'ReactHeaders', package: rn},
-    {name: 'ReactNativeHeaders', package: rn},
-    {name: 'ReactNativeDependenciesHeaders', package: rn},
-    {name: 'ReactAppHeaders', package: 'React-GeneratedCode'},
+    ...REACT_NATIVE_PRODUCTS.map(name => ({name, package: rn})),
+    ...REACT_CODEGEN_PRODUCTS.map(name => ({
+      name,
+      package: REACT_CODEGEN_PACKAGE_NAME,
+    })),
   ];
 }
 function reactProductDeps() /*: string */ {
@@ -146,7 +170,7 @@ function reactDescriptor(
     };
   } else if (absXcframeworks != null) {
     packageRef = {
-      name: 'ReactNative',
+      name: REACT_NATIVE_PACKAGE_NAME,
       path: toPosix(absXcframeworks),
       relPath:
         xcframeworksRelPath != null ? toPosix(xcframeworksRelPath) : undefined,
@@ -155,7 +179,7 @@ function reactDescriptor(
     return null;
   }
   const products = reactProducts().filter(
-    p => p.package !== 'React-GeneratedCode' || codegenPackageExists,
+    p => p.package !== REACT_CODEGEN_PACKAGE_NAME || codegenPackageExists,
   );
   return {packageRef, products};
 }
@@ -191,6 +215,18 @@ function parseArgs(argv /*: Array<string> */) /*: AutolinkingArgs */ {
       describe:
         'Path to the xcframeworks sub-package (absolute or relative to appRoot)',
     })
+    .option('ios-deployment-target', {
+      type: 'string',
+      describe: `Platform floor of the generated manifests (default: ${MIN_IOS_VERSION_SUPPORTED})`,
+    })
+    .option('cxx-api-define', {
+      type: 'string',
+      array: true,
+      choices: [...CXX_API_DEFINES],
+      default: [],
+      describe:
+        "React Native C++ stable API macro to define in the app's spm.modules packages (repeatable)",
+    })
     .usage(
       'Usage: $0 [options]\n\nGenerates autolinked/Package.swift for SPM autolinking.',
     )
@@ -203,6 +239,10 @@ function parseArgs(argv /*: Array<string> */) /*: AutolinkingArgs */ {
     autolinkingJson: parsed['autolinking-json'] ?? null,
     output: parsed.output ?? null,
     xcframeworksPath: parsed['xcframeworks-path'] ?? null,
+    iosDeploymentTarget: sanitizeIosDeploymentTarget(
+      parsed['ios-deployment-target'],
+    ),
+    cxxApiDefines: parsed['cxx-api-define'],
   };
 }
 
@@ -219,58 +259,116 @@ function readAutolinkingJson(
 }
 
 /**
- * Attempts to read react-native.config.js to find spm.modules entries.
- * These are extra modules not discoverable via autolinking.json.
+ * One of the app's settings, and the root that declared it. Looked up field by
+ * field so a project-root `swiftpmConfig` cannot hide a field the Xcode dir
+ * still declares: the directory holding the app's package.json wins (where
+ * codegen reads `codegenConfig` from), and `appRoot` — the Xcode project dir,
+ * the settings' old home — fills the gaps.
+ */
+function appConfigField(
+  appRoot /*: string */,
+  field /*: 'modules' | 'denyPlugins' */,
+) /*: ?{root: string, value: unknown} */ {
+  const projectRoot = findProjectRoot(appRoot);
+  const roots = projectRoot === appRoot ? [appRoot] : [projectRoot, appRoot];
+  for (const root of roots) {
+    const value = readSwiftpmConfig(root, defaultReadConfig(root))?.[field];
+    if (value === undefined) {
+      continue;
+    }
+    if (root !== projectRoot) {
+      warn(
+        `Read '${field}' from ${displayPath(root)}. Move it to 'swiftpmConfig' in ${displayPath(path.join(projectRoot, 'package.json'))} — an app's SwiftPM settings belong with its package.json.`,
+      );
+    }
+    return {root, value};
+  }
+  return null;
+}
+
+/**
+ * The app's own native modules — the ones autolinking.json cannot discover —
+ * with the root that declared them, since each `path` is relative to the file
+ * it is written in:
  *
- * Expected structure in react-native.config.js:
- * module.exports = {
- *   ...
- *   spm: {
- *     modules: [
+ *   // <project root>/package.json
+ *   "swiftpmConfig": {
+ *     "modules": [
  *       {
- *         name: "MyNativeModule",
- *         path: "ios/MyNativeModule",            // relative to appRoot
- *         exclude: ["*.js", "*.podspec"],        // optional
- *         publicHeadersPath: ".",                // optional
+ *         "name": "MyNativeModule",
+ *         "path": "ios/MyNativeModule",
+ *         "exclude": ["*.js", "*.podspec"]
  *       }
  *     ]
  *   }
- * }
  */
 function readSpmModulesFromConfig(
   appRoot /*: string */,
-) /*: Array<SpmModuleConfig> */ {
-  const configPath = path.join(appRoot, 'react-native.config.js');
-  if (!fs.existsSync(configPath)) {
-    return [];
+) /*: {modules: Array<SpmModuleConfig>, root: string} */ {
+  const declared = appConfigField(appRoot, 'modules');
+  if (declared == null || !Array.isArray(declared.value)) {
+    return {modules: [], root: appRoot};
   }
-  try {
-    // $FlowFixMe[unsupported-syntax] dynamic require by computed path
-    const config = require(configPath);
-    return config.spm?.modules ?? [];
-  } catch (e) {
-    // Config might use Ruby interop or other patterns – skip
-    return [];
+  // Entries stay unvalidated here: assertSpmModuleName checks each name, and
+  // the emission loop reads the rest defensively.
+  // $FlowFixMe[incompatible-type] user-authored entries
+  const modules /*: ReadonlyArray<SpmModuleConfig> */ = declared.value;
+  return {modules: [...modules], root: declared.root};
+}
+
+function moduleClashDiagnosis(
+  moduleName /*: string */,
+  clash /*: string */,
+) /*: string */ {
+  if (clash === moduleName) {
+    return `is already the name of another autolinked target.`;
+  }
+  if (clash.toLowerCase() === moduleName.toLowerCase()) {
+    return `differs from the existing target '${clash}' only in case, which collides on case-insensitive filesystems.`;
+  }
+  return `compiles as the same module as the existing target '${clash}'.`;
+}
+
+/**
+ * Validates one app-local `spm.modules` name against the same rules a library's
+ * `spm.name` gets: a usable Swift identifier, not a name React Native reserves,
+ * and not one already taken by another module or an autolinked dep.
+ * `taken` is keyed by swiftNameKey, valued with the name as written.
+ */
+function assertSpmModuleName(
+  name /*: unknown */,
+  taken /*: Map<string, string> */,
+) /*: void */ {
+  const remedy =
+    "Rename it in this app's package.json 'swiftpmConfig.modules'.";
+  if (typeof name !== 'string' || !isValidSwiftName(name)) {
+    throw new Error(
+      `react-native autolinking: invalid 'swiftpmConfig.modules' name ${JSON.stringify(name) ?? 'undefined'}: must start with a letter or underscore and contain only letters, digits, underscores, or hyphens.`,
+    );
+  }
+  const moduleName = name;
+  assertSwiftNameNotReserved(moduleName, {
+    label: `the 'swiftpmConfig.modules' entry '${moduleName}'`,
+    remedy,
+    extraReservedNames: reservedNamesForRun(),
+  });
+  const clash = taken.get(swiftNameKey(moduleName));
+  if (clash != null) {
+    throw new SpmNameCollisionError(
+      `react-native autolinking: SPM Swift name collision: the 'swiftpmConfig.modules' entry '${moduleName}' ` +
+        moduleClashDiagnosis(moduleName, clash) +
+        ` ${remedy}`,
+    );
   }
 }
 
 /**
- * Reads the app's `spm.denyPlugins` — npm names of autolinking plugins to
- * skip. The escape hatch for the transitive plugin discovery (an app opts a
- * framework's plugin OUT); no allowlist is required.
+ * The app's `denyPlugins` — npm names of autolinking plugins to skip. The
+ * escape hatch for transitive plugin discovery (an app opts a framework's
+ * plugin OUT); no allowlist is required.
  */
 function readDenyPluginsFromConfig(appRoot /*: string */) /*: Array<string> */ {
-  const configPath = path.join(appRoot, 'react-native.config.js');
-  if (!fs.existsSync(configPath)) {
-    return [];
-  }
-  try {
-    // $FlowFixMe[unsupported-syntax] dynamic require by computed path
-    const config = require(configPath);
-    return config.spm?.denyPlugins ?? [];
-  } catch (e) {
-    return [];
-  }
+  return stringList(appConfigField(appRoot, 'denyPlugins')?.value);
 }
 
 /**
@@ -340,6 +438,17 @@ const REACT_CXX_CONFIG_DEFINES = [
   '.define("NDEBUG", .when(configuration: .release))',
 ];
 
+// The config-gated defines plus the React Native C++ stable API macros the app
+// opted into (CXX_API_DEFINES).
+function reactCxxDefines(
+  cxxApiDefines /*: ReadonlyArray<string> */ = [],
+) /*: Array<string> */ {
+  return [
+    ...REACT_CXX_CONFIG_DEFINES,
+    ...Array.from(new Set(cxxApiDefines)).map(name => `.define("${name}")`),
+  ];
+}
+
 // Marker the autolinker stamps onto every synth Package.swift it writes.
 // Files lacking this marker are treated as user-managed (self-managed) and
 // are referenced directly rather than wrapped — see findSelfManagedPackageDir.
@@ -385,21 +494,9 @@ function findSelfManagedPackageDir(absSource /*: string */) /*: ?string */ {
  * the scaffolder translates the podspec into a Package.swift.
  */
 function hasPodspec(absSource /*: string */) /*: boolean */ {
-  for (const sub of ['', 'ios']) {
-    const dir = sub === '' ? absSource : path.join(absSource, sub);
-    try {
-      if (
-        fs
-          .readdirSync(dir)
-          .some(e => e.endsWith('.podspec') && !e.startsWith('.spm-scaffold-'))
-      ) {
-        return true;
-      }
-    } catch {
-      // dir does not exist; try the next candidate
-    }
-  }
-  return false;
+  return [absSource, path.join(absSource, 'ios')].some(
+    dir => findPodspecs(dir).length > 0,
+  );
 }
 
 /**
@@ -726,74 +823,35 @@ function expandSpmSourceGlobs(
 }
 
 /**
+ * The Swift name expandSpmDependencies resolved for `npmName`, or a hard error:
+ * re-deriving one here would emit a reference nothing in the graph matches.
+ */
+function requireSwiftName(
+  npmName /*: string */,
+  resolved /*: ?string */,
+) /*: string */ {
+  if (resolved == null) {
+    throw new Error(
+      `react-native autolinking: no resolved Swift name for '${npmName}'. expandSpmDependencies must resolve every autolinked dep's name before SPM targets are generated.`,
+    );
+  }
+  return resolved;
+}
+
+/**
  * Converts an autolinking.json dependency to an SPM target spec.
  * Returns null if the dependency doesn't have iOS support.
  *
  * `swiftNameByNpm` maps each autolinked dep's npm name to its resolved Swift
- * name (populated by expandSpmDependencies, possibly overridden via the dep's
- * `spm.name` config). Optional for backwards compatibility with callers that
- * don't have the map; falls back to `toSwiftName(name)` per entry.
+ * name (populated by expandSpmDependencies from the dep's podspec and
+ * `spm.name`). Every name this function emits comes from there — see
+ * requireSwiftName.
  */
-/**
- * Read the dep's podspec (if any) and extract its declared
- * `pod_target_xcconfig` HEADER_SEARCH_PATHS, substituted relative to the dep
- * source dir. Returns paths suitable for an SPM `.headerSearchPath()`
- * directive whose target.path is the dep root (entries are NOT yet prefixed
- * with the synth wrapper's `root/` — the emission site adds that prefix
- * because the wrapper's target.path is `.`, not the source dir).
- *
- * Without these, path-style angle includes like
- * `<react/renderer/components/safeareacontext/X.h>` (used by
- * react-native-safe-area-context, reanimated, screens, etc.) fail to resolve
- * because the headers live under the dep's `common/cpp/` rather than under
- * the framework-imported xcframework headers.
- */
-function extractPodspecHeaderSearchPaths(
-  sourceDir /*: string */,
-) /*: Array<string> */ {
-  let podspecPath /*: ?string */ = null;
-  try {
-    const entries = fs.readdirSync(sourceDir);
-    // Skip a crashed run's leftover `.spm-scaffold-<pid>-<name>.podspec` copy.
-    const candidate = entries.find(
-      e => e.endsWith('.podspec') && !e.startsWith('.spm-scaffold-'),
-    );
-    if (candidate != null) {
-      podspecPath = path.join(sourceDir, candidate);
-    }
-  } catch {
-    return [];
-  }
-  if (podspecPath == null) return [];
-
-  let model;
-  try {
-    model = readPodspec(podspecPath);
-  } catch {
-    return [];
-  }
-
-  const out /*: Array<string> */ = [];
-  for (const raw of model.headerSearchPaths) {
-    const substituted = raw
-      .replace(/\$\(PODS_TARGET_SRCROOT\)/g, '.')
-      .replace(/\$\{PODS_TARGET_SRCROOT\}/g, '.');
-    // Drop entries still containing unresolved Xcode tokens — emitting them
-    // verbatim would surface as clang "no such file" failures.
-    if (/\$[({]/.test(substituted)) continue;
-    const cleaned = substituted.replace(/^\.\//, '').replace(/^\//, '');
-    if (cleaned.length > 0 && !out.includes(cleaned)) {
-      out.push(cleaned);
-    }
-  }
-  return out;
-}
-
 function autolinkingDepToSpmTarget(
   depName /*: string */,
   dep /*: AutolinkedDep */,
   outputDir /*: string */,
-  swiftNameByNpm /*: ?Map<string, string> */,
+  swiftNameByNpm /*: Map<string, string> */,
 ) /*: SpmTarget | null */ {
   const iosPlatform = dep.platforms.ios;
   const sourceDir = iosPlatform.sourceDir ?? dep.root;
@@ -806,10 +864,7 @@ function autolinkingDepToSpmTarget(
   // same convention the spmModule branch in main() follows.
   const relSourcePath = path.relative(outputDir, sourceDir);
 
-  // Prefer the resolved Swift name (which honors `spm.name` overrides set in
-  // the dep's react-native.config.js). Fall back to toSwiftName(depName) when
-  // the caller didn't run expandSpmDependencies.
-  const targetName = dep.swiftName ?? toSwiftName(depName);
+  const targetName = requireSwiftName(depName, dep.swiftName);
 
   // No exclude inference — main()'s emission loop emits `sources:` (an
   // explicit allowlist). User-supplied excludes still work.
@@ -819,16 +874,12 @@ function autolinkingDepToSpmTarget(
   const resources = privacyManifest != null ? [privacyManifest] : undefined;
 
   // Map declared spm.dependencies (npm names) to Swift target names so the
-  // synth's .product(...) deps list reaches the consuming target. Each
-  // transitive npm name's Swift name comes from the map (honoring overrides);
-  // toSwiftName fallback handles entries the map doesn't know about.
+  // synth's .product(...) deps list reaches the consuming target.
   const spmDeps /*: Array<string> */ = dep.spmDependencies ?? [];
   const spmTargetDependencies =
     spmDeps.length > 0
-      ? spmDeps.map(n => swiftNameByNpm?.get(n) ?? toSwiftName(n))
+      ? spmDeps.map(n => requireSwiftName(n, swiftNameByNpm.get(n)))
       : undefined;
-
-  const headerSearchPaths = extractPodspecHeaderSearchPaths(sourceDir);
 
   return {
     name: targetName,
@@ -837,8 +888,6 @@ function autolinkingDepToSpmTarget(
     publicHeadersPath: inferPublicHeadersPath(sourceDir),
     resources,
     spmTargetDependencies,
-    headerSearchPaths:
-      headerSearchPaths.length > 0 ? headerSearchPaths : undefined,
   };
 }
 
@@ -877,6 +926,8 @@ function generateAutolinkedPackageSwift(
     input.pluginPackageDeps ?? [];
   const pluginProductDeps /*: ReadonlyArray<PluginProductDep> */ =
     input.pluginProductDeps ?? [];
+  const iosDeploymentTarget /*: string */ =
+    input.iosDeploymentTarget ?? MIN_IOS_VERSION_SUPPORTED;
 
   // Package-level dependencies: one .package(path:) per autolinked dep,
   // plus ReactNative if any inline target needs to import React headers.
@@ -899,12 +950,14 @@ function generateAutolinkedPackageSwift(
   ) {
     packageDeps.push(
       reactNativePackageDecl(
-        `.package(name: "ReactNative", path: "${xcframeworksRelPath}")`,
+        `.package(name: "${REACT_NATIVE_PACKAGE_NAME}", path: "${xcframeworksRelPath}")`,
       ),
     );
     // Per-app generated headers come from the ReactAppHeaders product in
     // the codegen package (sibling of the autolinking dir).
-    packageDeps.push(`.package(name: "React-GeneratedCode", path: "../ios")`);
+    packageDeps.push(
+      `.package(name: "${REACT_CODEGEN_PACKAGE_NAME}", path: "../ios")`,
+    );
   }
 
   // AutolinkedAggregate's target dependencies: .product(...) for npm sub-package
@@ -936,7 +989,7 @@ function generateAutolinkedPackageSwift(
             name: "${t.name}",
             dependencies: [${reactProductDeps()}],
             path: "${t.path}",${excludeLine}${publicHeadersLine}${resourcesLine}
-            cxxSettings: [${REACT_CXX_CONFIG_DEFINES.join(', ')}],
+            cxxSettings: [${reactCxxDefines().join(', ')}],
             linkerSettings: [.linkedFramework("UIKit"), .linkedFramework("Foundation"), .linkedFramework("CoreGraphics")]
         )`;
   });
@@ -1007,10 +1060,10 @@ import PackageDescription
 import Foundation
 
 ${guardBlock}let package = Package(
-    name: "Autolinked",
-    platforms: [.iOS(.v15)],
+    name: "${AUTOLINKED_PACKAGE_NAME}",
+    platforms: [.iOS("${iosDeploymentTarget}")],
     products: [
-        .library(name: "Autolinked", targets: ["AutolinkedAggregate"]),
+        .library(name: "${AUTOLINKED_PACKAGE_NAME}", targets: ["AutolinkedAggregate"]),
     ],
 ${packageDepsBlock}    targets: [
         .target(
@@ -1044,12 +1097,6 @@ function generateSynthPackageSwift(spec /*: SynthPackageSpec */) /*: string */ {
   const exclude /*: Array<string> */ = spec.exclude ?? [];
   const sources /*: ?Array<string> */ = spec.sources;
   const publicHeadersPath /*: ?string */ = spec.publicHeadersPath ?? null;
-  // Per-dep header search paths from the podspec's
-  // pod_target_xcconfig HEADER_SEARCH_PATHS — already prefixed by the caller
-  // with the synth wrapper's `root/` so they resolve relative to target.path.
-  // Emitted as `.headerSearchPath()` directives, which SPM accepts on
-  // cSettings / cxxSettings without needing absolute paths.
-  const headerSearchPaths /*: Array<string> */ = spec.headerSearchPaths ?? [];
   const spmDependencies /*: Array<{swiftName: string}> */ =
     spec.spmDependencies ?? [];
   const hasReactDep /*: boolean */ = spec.hasReactDep !== false;
@@ -1058,6 +1105,8 @@ function generateSynthPackageSwift(spec /*: SynthPackageSpec */) /*: string */ {
   const targetPath /*: string */ = spec.targetPath ?? `Sources/${swiftName}`;
   const siblingSynthAbsolutePaths /*: {[string]: string} */ =
     spec.siblingSynthAbsolutePaths ?? {};
+  const iosDeploymentTarget /*: string */ =
+    spec.iosDeploymentTarget ?? MIN_IOS_VERSION_SUPPORTED;
 
   // Package dependencies — ReactNative + each spm sibling synth package.
   // The React + codegen package paths are plain relative strings computed by
@@ -1074,13 +1123,13 @@ function generateSynthPackageSwift(spec /*: SynthPackageSpec */) /*: string */ {
       spec.codegenPackagePath ?? '../../../ios';
     packageDeps.push(
       reactNativePackageDecl(
-        `.package(name: "ReactNative", path: "${reactNativePackagePath}")`,
+        `.package(name: "${REACT_NATIVE_PACKAGE_NAME}", path: "${reactNativePackagePath}")`,
       ),
     );
     // Per-app generated headers come from the ReactAppHeaders product in
     // the codegen package.
     packageDeps.push(
-      `.package(name: "React-GeneratedCode", path: "${codegenPackagePath}")`,
+      `.package(name: "${REACT_CODEGEN_PACKAGE_NAME}", path: "${codegenPackagePath}")`,
     );
   }
   for (const dep of spmDependencies) {
@@ -1131,22 +1180,11 @@ function generateSynthPackageSwift(spec /*: SynthPackageSpec */) /*: string */ {
     packageDeps.length > 0
       ? `    dependencies: [\n        ${packageDeps.join(',\n        ')},\n    ],\n`
       : '';
-  // `.headerSearchPath(...)` entries from the podspec — first-class
-  // directives keep SPM's diagnostics meaningful (clang reports the
-  // dep-relative path on miss). React headers need no paths at all.
-  const headerSearchPathList = headerSearchPaths.map(
-    p => `.headerSearchPath("${p}")`,
-  );
-  const cSettingsLine =
-    headerSearchPathList.length > 0
-      ? `\n            cSettings: [${headerSearchPathList.join(', ')}],`
-      : '';
-  // ALWAYS emit the config-gated C++ defines (even with no header paths): a
-  // Fabric C++ target must compile with the same NDEBUG state as the prebuilt
-  // React.framework, else DebugStringConvertible's vtable / ShadowNode layout
-  // diverges and a Release build fails to link. Mirrors Package.swift.
-  const cxxEntries = [...REACT_CXX_CONFIG_DEFINES, ...headerSearchPathList];
-  const cxxSettingsLine = `\n            cxxSettings: [${cxxEntries.join(', ')}],`;
+  // ALWAYS emit the config-gated C++ defines: a Fabric C++ target must
+  // compile with the same NDEBUG state as the prebuilt React.framework, else
+  // DebugStringConvertible's vtable / ShadowNode layout diverges and a
+  // Release build fails to link. Mirrors Package.swift.
+  const cxxSettingsLine = `\n            cxxSettings: [${reactCxxDefines(spec.cxxApiDefines).join(', ')}],`;
 
   return `// swift-tools-version: 6.0
 // AUTO-GENERATED by scripts/generate-spm-autolinking.js – do not edit manually.
@@ -1156,7 +1194,7 @@ import PackageDescription
 
 let package = Package(
     name: "${swiftName}",
-    platforms: [.iOS(.v15)],
+    platforms: [.iOS("${iosDeploymentTarget}")],
     products: [
         .library(name: "${swiftName}"${isDynamic ? ', type: .dynamic' : ''}, targets: ["${swiftName}"]),
     ],
@@ -1164,7 +1202,7 @@ ${packageDepsBlock}    targets: [
         .target(
             name: "${swiftName}",
             dependencies: [${targetDeps.join(', ')}],
-            path: "${targetPath}",${excludeLine}${sourcesLine}${publicHeadersLine}${resourcesLine}${cSettingsLine}${cxxSettingsLine}
+            path: "${targetPath}",${excludeLine}${sourcesLine}${publicHeadersLine}${resourcesLine}${cxxSettingsLine}
             linkerSettings: [.linkedFramework("UIKit"), .linkedFramework("Foundation"), .linkedFramework("CoreGraphics")]
         ),
     ],
@@ -1251,11 +1289,13 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
     const allDeps = expandSpmDependencies(directDeps, {
       readConfig: defaultReadConfig,
       resolveDep: defaultResolveDep,
+      readPodspec: defaultReadPodspec,
+      extraReservedNames: reservedNamesForRun(),
     });
 
-    // Map every autolinked npm name to its resolved Swift name (post-override)
-    // so transitive references inside autolinkingDepToSpmTarget find the right
-    // target identifier — not just the auto-derived toSwiftName.
+    // Map every autolinked npm name to its resolved Swift name so transitive
+    // references inside autolinkingDepToSpmTarget find the right target
+    // identifier.
     const swiftNameByNpm /*: Map<string, string> */ = new Map();
     for (const dep of allDeps) {
       if (dep.swiftName != null) {
@@ -1287,8 +1327,39 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
       discoveredPlugins.map(p => p.depName),
     );
 
+    // Skipped means no sibling package is created for the host either, so a
+    // dep declaring it in `spm.dependencies` gets a package reference to a
+    // path this run never writes — SPM then reports only the missing path.
+    // Only manifests React Native emits can carry that reference: a dep
+    // shipping its own Package.swift declares its package references itself,
+    // and the classification loop below would treat it as self-managed.
+    const pluginHostDependents /*: Map<string, Array<string>> */ = new Map();
+    for (const dep of allDeps) {
+      const declaredHosts = (dep.spmDependencies ?? []).filter(name =>
+        pluginHostDeps.has(name),
+      );
+      if (declaredHosts.length === 0) {
+        continue;
+      }
+      const sourceDir = dep.platforms.ios.sourceDir ?? dep.root;
+      if (sourceDir == null || findSelfManagedPackageDir(sourceDir) != null) {
+        continue;
+      }
+      for (const host of declaredHosts) {
+        const dependents = pluginHostDependents.get(host) ?? [];
+        dependents.push(dep.name);
+        pluginHostDependents.set(host, dependents);
+      }
+    }
+
     for (const dep of allDeps) {
       if (pluginHostDeps.has(dep.name)) {
+        const dependents = pluginHostDependents.get(dep.name);
+        if (dependents != null) {
+          throw new Error(
+            `react-native autolinking: '${dep.name}' ships an SPM autolinking plugin, which owns its native contribution — so React Native does not build it as a sibling target for anything to depend on. It is declared as a SwiftPM dependency by ${dependents.map(name => `'${name}'`).join(', ')}. Remove it there; nothing is lost. Its plugin links its products into the app and resolves its own ecosystem's dependencies, so a library that builds against it does not declare it here.`,
+          );
+        }
         log(
           `Skipping ${dep.name} target generation — provided by its SPM autolinking plugin`,
         );
@@ -1320,9 +1391,20 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
   // If the module declares `sources: [glob, ...]` (CocoaPods-style), expand
   // the globs now relative to its dir and attach the file list to the target
   // so the emission loop below renders `sources: [...]` literally.
-  const configModules = readSpmModulesFromConfig(appRoot);
+  const {modules: configModules, root: configModulesRoot} =
+    readSpmModulesFromConfig(appRoot);
+  // Module names land in the manifest exactly as written, so they get the same
+  // checks a dep's Swift name gets. Seeded with the dep target names already
+  // emitted so a module can't shadow an autolinked library either.
+  const takenSwiftNames /*: Map<string, string> */ = new Map(
+    entries.map(entry => [swiftNameKey(entry.target.name), entry.target.name]),
+  );
   for (const mod of configModules) {
-    const absPath = path.resolve(appRoot, mod.path);
+    assertSpmModuleName(mod.name, takenSwiftNames);
+    takenSwiftNames.set(swiftNameKey(mod.name), mod.name);
+    // Relative to the package.json (or config file) that declared it, so a
+    // path reads correctly from where it is written.
+    const absPath = path.resolve(configModulesRoot, mod.path);
     const relPath = path.relative(outputDir, absPath);
     const userSources =
       Array.isArray(mod.sources) && mod.sources.length > 0
@@ -1333,7 +1415,9 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
         name: mod.name,
         path: relPath,
         exclude: mod.exclude ?? [],
-        publicHeadersPath: mod.publicHeadersPath ?? null,
+        // The synth wrapper owns the module's public interface: it declares
+        // publicHeadersPath: "include", a symlink to the module's header tree.
+        publicHeadersPath: null,
         sources: userSources,
       },
       origin: 'spmModule',
@@ -1388,11 +1472,14 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
   // is the Swift module name (guaranteed unique per dep), so SPM's
   // path-basename-based package identity never collides — even when two
   // libs ship their own Package.swift inside `ios/` (a common convention).
-  // Wiped on every run; populated below as self-managed deps are visited.
+  // Populated below as self-managed deps are visited, then pruned. Entries
+  // that do not change keep their inode: Xcode holds each one as a loaded
+  // package root, and recreating one it already resolved fails the build with
+  // "Missing package product".
   const libsDir = path.join(outputDir, 'libs');
+  const wantedLibAliases /*: Set<string> */ = new Set();
   fs.mkdirSync(packagesDir, {recursive: true});
   fs.mkdirSync(headersDir, {recursive: true});
-  fs.rmSync(libsDir, {recursive: true, force: true});
   fs.mkdirSync(libsDir, {recursive: true});
 
   const wrapperDirs /*: Map<string, string> */ = new Map();
@@ -1402,8 +1489,9 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
   // longer silently synthesize one for them (that duplicated the scaffolder and
   // hid the gap from the developer and the library author) — collect them and
   // fail with an actionable message after the classification pass. spmModules
-  // (app-local, podspec-less, explicitly declared in react-native.config.js)
-  // keep their synth wrappers: there is nothing to scaffold for them.
+  // (app-local, explicitly declared in react-native.config.js) keep their synth
+  // wrappers: an app-local dir has no npm identity, so there is no package for
+  // the aggregator to reference until one is written for it.
   const missingManifests /*: Array<{name: string, npmName: string, hasPodspec: boolean, mixed?: boolean}> */ =
     [];
 
@@ -1455,11 +1543,14 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
       }
       continue;
     }
-    // spmModule: synth wrapper is the legitimate mechanism (no podspec exists
-    // to scaffold from, and the app developer declared it explicitly). But a
-    // mixed-language module can't be wrapped either — SPM can't compile Swift +
-    // C-family sources in one target, and a synth wrapper would fail with a
-    // cryptic SPM resolve error. Surface the same friendly diagnostic the
+    // spmModule: the synth wrapper is the mechanism, not a fallback — an
+    // app-local dir has no npm identity, so the wrapper is the only package the
+    // aggregator can reference. No podspec is read on this route by design:
+    // app-local native code isn't required to carry one. (A hand-written
+    // Package.swift still wins — the self-managed check above claims it first.)
+    // But a mixed-language module can't be wrapped either — SPM can't compile
+    // Swift + C-family sources in one target, and a synth wrapper would fail
+    // with a cryptic SPM resolve error. Surface the same friendly diagnostic the
     // community-dep path uses instead of letting SPM emit the cryptic one.
     if (hasMixedLanguageSources(absSource)) {
       throw new Error(
@@ -1521,6 +1612,7 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
       const realPackageDir = selfManagedDirs.get(target.name) ?? absSource;
       const aliasPath = path.join(libsDir, target.name);
       ensureSymlink(aliasPath, realPackageDir);
+      wantedLibAliases.add(target.name);
       aggregatorPackageDeps.push({
         swiftName: target.name,
         packagePath: `libs/${target.name}`,
@@ -1570,17 +1662,9 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
     const prefixedSources /*: ?Array<string> */ =
       rawSources.length > 0 ? rawSources.map(withRoot) : null;
 
-    // Podspec HEADER_SEARCH_PATHS were captured relative to the dep's source
-    // dir. The wrapper exposes the source dir under `root/` (target.path is
-    // `.`, the wrapper dir), so each entry must be prefixed with `root/` so
-    // clang sees the real subtree.
-    const prefixedHeaderSearchPaths /*: ?Array<string> */ =
-      target.headerSearchPaths != null && target.headerSearchPaths.length > 0
-        ? target.headerSearchPaths.map(withRoot)
-        : null;
-
     const synthContent = generateSynthPackageSwift({
       swiftName: target.name,
+      iosDeploymentTarget: args.iosDeploymentTarget,
       exclude: prefixedExclude,
       sources: prefixedSources,
       // Stub include/ subdir lives in the wrapper dir; satisfies SPM's
@@ -1589,11 +1673,11 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
       // header farm at <outputDir>/headers is folded into it).
       publicHeadersPath: 'include',
       resources: prefixedResources,
-      headerSearchPaths: prefixedHeaderSearchPaths,
       spmDependencies: (target.spmTargetDependencies ?? []).map(swiftName => ({
         swiftName,
       })),
       hasReactDep,
+      cxxApiDefines: args.cxxApiDefines,
       // Relative paths from the synth dir (<outputDir>/packages/<Name>) to the
       // app's React xcframeworks + codegen packages. Computed here because the
       // synth's depth is fixed and it is regenerated every run — no runtime
@@ -1647,23 +1731,30 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
     });
   }
 
-  // Prune stale wrappers + header dirs for entries no longer autolinked.
-  // Preserve both wrapper-managed and self-managed names; only entries that
-  // are no longer autolinked at all get removed. Note: `packages/` only has
-  // wrapper-managed names (self-managed deps live in their own source dirs),
-  // but `headers/` has both since we populate the central tree for everyone.
+  // Prune stale wrappers, header dirs and lib aliases for entries no longer
+  // autolinked. Preserve both wrapper-managed and self-managed names; only
+  // entries that are no longer autolinked at all get removed. Note:
+  // `packages/` only has wrapper-managed names (self-managed deps live in
+  // their own source dirs), but `headers/` has both since we populate the
+  // central tree for everyone. `libs/` keeps only the aliases written above,
+  // so a dep that stopped being self-managed loses its alias too.
   const activeNames /*: Set<string> */ = new Set([
     ...wrapperDirs.keys(),
     ...selfManagedDirs.keys(),
   ]);
-  for (const subdir of ['packages', 'headers']) {
+  const pruneTargets /*: Array<[string, Set<string>]> */ = [
+    ['packages', activeNames],
+    ['headers', activeNames],
+    ['libs', wantedLibAliases],
+  ];
+  for (const [subdir, keptNames] of pruneTargets) {
     const dir = path.join(outputDir, subdir);
     try {
       const existing /*: Array<{name: string, isSymbolicLink(): boolean, isDirectory(): boolean}> */ =
         // $FlowFixMe[incompatible-type] Dirent typing
         fs.readdirSync(dir, {withFileTypes: true});
       for (const entry of existing) {
-        if (activeNames.has(entry.name)) continue;
+        if (keptNames.has(entry.name)) continue;
         const stale = path.join(dir, entry.name);
         if (entry.isSymbolicLink() || !entry.isDirectory()) {
           fs.unlinkSync(stale);
@@ -1686,6 +1777,7 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
   let pluginGeneratedSources /*: Array<{path: string}> */ = [];
   let pluginFlavoredFrameworks /*: Array<PluginFlavoredFramework> */ = [];
   let pluginWatchPaths /*: Array<string> */ = [];
+  let pluginScriptPhases /*: Array<PluginScriptPhase> */ = [];
   if (discoveredPlugins.length > 0) {
     // React-GeneratedCode is the per-app codegen package (referenced as
     // `../ios` from outputDir). It may be absent (no codegen this run), so the
@@ -1714,15 +1806,17 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
     pluginGeneratedSources = result.generatedSources;
     pluginFlavoredFrameworks = result.flavoredFrameworks;
     pluginWatchPaths = result.watchPaths;
+    pluginScriptPhases = result.scriptPhases;
     log(
       `SPM plugins contributed ${pluginPackageDeps.length} package(s), ` +
         `${pluginProductDeps.length} product(s), ` +
         `${pluginGeneratedSources.length} generated source(s), ` +
-        `${pluginFlavoredFrameworks.length} flavored framework(s)`,
+        `${pluginFlavoredFrameworks.length} flavored framework(s), ` +
+        `${pluginScriptPhases.length} script phase(s)`,
     );
   }
 
-  // Plugin sidecars. Both are ALWAYS written — even `[]` — so removing a
+  // Plugin sidecars. All are ALWAYS written — even `[]` — so removing a
   // plugin (or dropping its declaration) clears stale entries. Machine-local
   // absolute paths; gitignored + regenerated every sync.
   fs.mkdirSync(outputDir, {recursive: true});
@@ -1741,12 +1835,18 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
     JSON.stringify(pluginFlavoredFrameworks, null, 2) + '\n',
     'utf8',
   );
+  fs.writeFileSync(
+    path.join(outputDir, '.spm-plugin-script-phases.json'),
+    JSON.stringify(pluginScriptPhases, null, 2) + '\n',
+    'utf8',
+  );
 
   // Top-level aggregator: references every entry as .package(path:) and
   // depends on each via .product(...). No more inline targets — every
   // autolinked dep is a real SPM package in its own source dir.
   const aggregatorContent = generateAutolinkedPackageSwift({
     npmDeps: aggregatorPackageDeps,
+    iosDeploymentTarget: args.iosDeploymentTarget,
     hasReactDep,
     xcframeworksRelPath,
     pluginPackageDeps,
@@ -1768,12 +1868,15 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
   //      stale until an unrelated install triggers a sync. The dep ROOT is
   //      threaded through the entry (entry.root, from the autolinking model),
   //      not derived by walking up from the (possibly nested) source dir.
+  //      Both are listed even when absent: one that appears later (e.g. after
+  //      `spm scaffold`) changes self-managed detection and needs a re-sync.
   //   3. Plugin-contributed paths (e.g. Expo's own Package.swift / per-module
   //      manifests) — already validated absolute in invokePlugins.
   // The phase distinguishes dir vs file with `-d`/`-f` at build time (no
-  // markers). The existsSync filter here is safe: these paths come from a
-  // successful sync so they exist now; a path that later VANISHES is caught at
-  // phase time against this file and forces a re-sync.
+  // markers). A listed path that later VANISHES forces a re-sync. Paths that do
+  // not exist yet go to .spm-sync-watch-absent, where one that APPEARS forces a
+  // re-sync; they stay out of this file because phases from older versions
+  // treat a missing listed path as stale.
   const watchCandidates /*: Array<string> */ = [...entryAbsDirs.values()];
   for (const entry of entries) {
     const root = entry.root;
@@ -1784,12 +1887,21 @@ function main(argv /*:: ?: Array<string> */) /*: void */ {
     watchCandidates.push(path.join(root, '.react-native'));
   }
   watchCandidates.push(...pluginWatchPaths);
-  const watchPaths = Array.from(new Set(watchCandidates))
-    .filter(p => p.length > 0 && fs.existsSync(p))
-    .sort();
+  const watchPaths /*: Array<string> */ = [];
+  const absentWatchPaths /*: Array<string> */ = [];
+  for (const p of Array.from(new Set(watchCandidates)).sort()) {
+    if (p.length > 0) {
+      (fs.existsSync(p) ? watchPaths : absentWatchPaths).push(p);
+    }
+  }
   fs.writeFileSync(
     path.join(outputDir, '.spm-sync-watch-paths'),
     watchPaths.join('\n') + (watchPaths.length > 0 ? '\n' : ''),
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(outputDir, '.spm-sync-watch-absent'),
+    absentWatchPaths.join('\n') + (absentWatchPaths.length > 0 ? '\n' : ''),
     'utf8',
   );
 
@@ -1873,6 +1985,7 @@ if (require.main === module) {
 
 module.exports = {
   main,
+  autolinkingDepToSpmTarget,
   generateAutolinkedPackageSwift,
   generateSynthPackageSwift,
   reactDescriptor,
@@ -1882,6 +1995,7 @@ module.exports = {
   findSelfManagedPackageDir,
   hasPodspec,
   hasMixedLanguageSources,
+  readDenyPluginsFromConfig,
   MissingManifestError,
   reportMissingManifests,
   AUTOGEN_MARKER,

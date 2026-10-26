@@ -7,10 +7,12 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <shared_mutex>
 #include <unordered_map>
 
-#include <react/renderer/core/ReactPrimitives.h>
+#include <React/RendererCore.h>
 #include <react/renderer/mounting/ShadowTree.h>
 
 namespace facebook::react {

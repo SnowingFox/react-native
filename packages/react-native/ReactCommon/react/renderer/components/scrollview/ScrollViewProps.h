@@ -7,7 +7,11 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <react/renderer/components/scrollview/HostPlatformScrollViewProps.h>
+
+#include <memory>
 
 namespace facebook::react {
 using ScrollViewProps = HostPlatformScrollViewProps;

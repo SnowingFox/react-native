@@ -8,7 +8,6 @@
 #import "RCTScrollViewComponentView.h"
 
 #import <React/RCTAssert.h>
-#import <React/RCTBridge+Private.h>
 #import <React/RCTConstants.h>
 #import <React/RCTScrollEvent.h>
 
@@ -360,9 +359,7 @@ static inline UIViewAnimationOptions animationOptionsWithCurve(UIViewAnimationCu
   MAP_SCROLL_VIEW_PROP(showsHorizontalScrollIndicator);
   MAP_SCROLL_VIEW_PROP(showsVerticalScrollIndicator);
 
-  if (oldScrollViewProps.automaticallyAdjustKeyboardInsets != newScrollViewProps.automaticallyAdjustKeyboardInsets) {
-    _automaticallyAdjustKeyboardInsets = newScrollViewProps.automaticallyAdjustKeyboardInsets;
-  }
+  _automaticallyAdjustKeyboardInsets = newScrollViewProps.automaticallyAdjustKeyboardInsets;
 
   if (oldScrollViewProps.scrollIndicatorInsets != newScrollViewProps.scrollIndicatorInsets) {
     _scrollView.scrollIndicatorInsets = RCTUIEdgeInsetsFromEdgeInsets(newScrollViewProps.scrollIndicatorInsets);
@@ -457,6 +454,9 @@ static inline UIViewAnimationOptions animationOptionsWithCurve(UIViewAnimationCu
   }
 
   [super updateProps:props oldProps:oldProps];
+
+  // Must run after `super updateProps:` so it is based on the latest calculated view.
+  ((RCTEnhancedScrollView *)_scrollView).inverted = [self isInverted];
 }
 
 - (void)updateState:(const State::Shared &)state oldState:(const State::Shared &)oldState
@@ -599,6 +599,7 @@ static inline UIViewAnimationOptions animationOptionsWithCurve(UIViewAnimationCu
   metrics.containerSize = RCTSizeFromCGSize(_scrollView.bounds.size);
   metrics.zoomScale = _scrollView.zoomScale;
   metrics.timestamp = CACurrentMediaTime();
+  metrics.responderIgnoreScroll = !_isUserTriggeredScrolling;
 
   if (_layoutMetrics.layoutDirection == LayoutDirection::RightToLeft) {
     metrics.contentOffset.x = metrics.contentSize.width - metrics.containerSize.width - metrics.contentOffset.x;
@@ -690,9 +691,11 @@ static inline UIViewAnimationOptions animationOptionsWithCurve(UIViewAnimationCu
   _state.reset();
 
   const auto &props = static_cast<const ScrollViewProps &>(*_props);
-  _scrollView.contentOffset = RCTCGPointFromPoint(props.contentOffset);
-  // Reset zoom scale to default
+  // Reset zoom scale to default. This must happen before resetting contentOffset:
+  // in RTL the mirroring transform makes UIKit report zoomScale == -1, and changing
+  // it to 1 makes UIKit move contentOffset.
   _scrollView.zoomScale = 1.0;
+  _scrollView.contentOffset = RCTCGPointFromPoint(props.contentOffset);
   // Invalidate cached content size so that updateState: recalculates the
   // container frame after zoomScale reset (which may have mutated it in RTL).
   _contentSize = CGSizeZero;
@@ -702,6 +705,7 @@ static inline UIViewAnimationOptions animationOptionsWithCurve(UIViewAnimationCu
   // and keeps it as an opt-in behavior.
   _scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
   _shouldUpdateContentInsetAdjustmentBehavior = YES;
+  _automaticallyAdjustKeyboardInsets = NO;
   _isUserTriggeredScrolling = NO;
   CGRect oldFrame = self.frame;
   self.frame = CGRectZero;

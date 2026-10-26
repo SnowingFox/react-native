@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @flow
+ * @flow strict-local
  * @format
  */
 
@@ -28,6 +28,7 @@ type PresentLocalNotificationDetails = {
   alertTitle?: string,
   soundName?: string,
   category?: string,
+  // $FlowFixMe[unclear-type]
   userInfo?: Object,
   applicationIconBadgeNumber?: number,
   fireDate?: number,
@@ -122,7 +123,7 @@ export interface PushNotification {
   /**
    * An alias for `getAlert` to get the notification's main message string
    */
-  getMessage(): ?string | ?Object;
+  getMessage(): ?string | ?LegacyObject;
 
   /**
    * Gets the sound string from the `aps` object
@@ -137,7 +138,7 @@ export interface PushNotification {
   /**
    * Gets the notification's main message from the `aps` object
    */
-  getAlert(): ?string | ?Object;
+  getAlert(): ?string | ?LegacyObject;
 
   /**
    * Gets the content-available number from the `aps` object
@@ -152,7 +153,7 @@ export interface PushNotification {
   /**
    * Gets the data object on the notif
    */
-  getData(): ?Object;
+  getData(): ?LegacyObject;
 
   /**
    * Gets the thread ID on the notif
@@ -174,7 +175,9 @@ export interface PushNotification {
  * @deprecated Use [@react-native-community/push-notification-ios](https://www.npmjs.com/package/@react-native-community/push-notification-ios) instead
  */
 class PushNotificationIOS {
+  // $FlowFixMe[unclear-type]
   _data: Object;
+  // $FlowFixMe[unclear-type]
   _alert: string | Object;
   _sound: string;
   _category: string;
@@ -276,7 +279,7 @@ class PushNotificationIOS {
    * See https://reactnative.dev/docs/pushnotificationios#getdeliverednotifications
    */
   static getDeliveredNotifications(
-    callback: (notifications: Array<Object>) => void,
+    callback: (notifications: Array<LegacyObject>) => void,
   ): void {
     invariant(
       NativePushNotificationManagerIOS,
@@ -316,7 +319,7 @@ class PushNotificationIOS {
    *
    * See https://reactnative.dev/docs/pushnotificationios#getapplicationiconbadgenumber
    */
-  static getApplicationIconBadgeNumber(callback: Function): void {
+  static getApplicationIconBadgeNumber(callback: LegacyFunction): void {
     invariant(
       NativePushNotificationManagerIOS,
       'PushNotificationManager is not available.',
@@ -330,6 +333,7 @@ class PushNotificationIOS {
    *
    * See https://reactnative.dev/docs/pushnotificationios#cancellocalnotification
    */
+  // $FlowFixMe[unclear-type]
   static cancelLocalNotifications(userInfo: Object): void {
     invariant(
       NativePushNotificationManagerIOS,
@@ -343,7 +347,7 @@ class PushNotificationIOS {
    *
    * See https://reactnative.dev/docs/pushnotificationios#getscheduledlocalnotifications
    */
-  static getScheduledLocalNotifications(callback: Function): void {
+  static getScheduledLocalNotifications(callback: LegacyFunction): void {
     invariant(
       NativePushNotificationManagerIOS,
       'PushNotificationManager is not available.',
@@ -359,7 +363,7 @@ class PushNotificationIOS {
    */
   static addEventListener(
     type: PushNotificationEventName,
-    handler: Function,
+    handler: LegacyFunction,
   ): void {
     invariant(
       type === 'notification' ||
@@ -539,7 +543,7 @@ class PushNotificationIOS {
    * `getInitialNotification` is sufficient.
    *
    */
-  constructor(nativeNotif: Object) {
+  constructor(nativeNotif: LegacyObject) {
     this._data = {};
     this._remoteNotificationCompleteCallbackCalled = false;
     this._isRemote = nativeNotif.remote;
@@ -603,7 +607,7 @@ class PushNotificationIOS {
   /**
    * An alias for `getAlert` to get the notification's main message string.
    */
-  getMessage(): ?string | ?Object {
+  getMessage(): ?string | ?LegacyObject {
     // alias because "alert" is an ambiguous name
     return this._alert;
   }
@@ -633,7 +637,7 @@ class PushNotificationIOS {
    *
    * See https://reactnative.dev/docs/pushnotificationios#getalert
    */
-  getAlert(): ?string | ?Object {
+  getAlert(): ?string | ?LegacyObject {
     return this._alert;
   }
 
@@ -660,7 +664,7 @@ class PushNotificationIOS {
    *
    * See https://reactnative.dev/docs/pushnotificationios#getdata
    */
-  getData(): ?Object {
+  getData(): ?LegacyObject {
     return this._data;
   }
 

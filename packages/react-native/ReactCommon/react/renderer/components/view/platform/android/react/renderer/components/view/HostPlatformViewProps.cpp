@@ -48,12 +48,6 @@ HostPlatformViewProps::HostPlatformViewProps(
           "focusable",
           sourceProps.focusable,
           {})),
-      hasTVPreferredFocus(convertRawProp(
-          context,
-          rawProps,
-          "hasTVPreferredFocus",
-          sourceProps.hasTVPreferredFocus,
-          {})),
       needsOffscreenAlphaCompositing(convertRawProp(
           context,
           rawProps,
@@ -120,7 +114,6 @@ void HostPlatformViewProps::setProp(
     RAW_SET_PROP_SWITCH_CASE(nativeBackground, "nativeBackgroundAndroid");
     RAW_SET_PROP_SWITCH_CASE(nativeForeground, "nativeForegroundAndroid");
     RAW_SET_PROP_SWITCH_CASE_BASIC(focusable);
-    RAW_SET_PROP_SWITCH_CASE_BASIC(hasTVPreferredFocus);
     RAW_SET_PROP_SWITCH_CASE_BASIC(needsOffscreenAlphaCompositing);
     RAW_SET_PROP_SWITCH_CASE_BASIC(renderToHardwareTextureAndroid);
     RAW_SET_PROP_SWITCH_CASE_BASIC(screenReaderFocusable);
@@ -166,7 +159,7 @@ static void updateBorderWidthPropValue(
     if (newValue.has_value()) {
       result[propName] = newValue.value();
     } else {
-      result[propName] = NULL;
+      result[propName] = nullptr;
     }
   }
 }
@@ -309,7 +302,8 @@ static void updateBorderColorPropValue(
     const std::optional<SharedColor>& newColor,
     const std::optional<SharedColor>& oldColor) {
   if (newColor != oldColor) {
-    result[propName] = newColor.has_value() ? *newColor.value() : NULL;
+    result[propName] = newColor.has_value() ? folly::dynamic(*newColor.value())
+                                            : folly::dynamic(nullptr);
   }
 }
 
@@ -417,7 +411,13 @@ inline static void updateAccessibilityStateProp(
   }
 
   if (!oldState.has_value() || newState->selected != oldState->selected) {
-    resultState["selected"] = newState->selected;
+    // Omitting the key when `selected` is unset is what tells the platform the
+    // component is not selectable. BaseViewManager#setViewState falls back to
+    // `setSelected(false)` for an absent key, so the rendered result is
+    // unchanged from when this was a plain `bool`.
+    if (newState->selected.has_value()) {
+      resultState["selected"] = newState->selected.value();
+    }
   }
 
   if (!oldState.has_value() || newState->busy != oldState->busy) {
@@ -449,6 +449,56 @@ inline static void updateAccessibilityStateProp(
   result["accessibilityState"] = resultState;
 }
 
+static folly::dynamic toDynamic(
+    const std::variant<std::monostate, ValueUnit>& lengthPercentageOrAuto) {
+  const auto* valueUnit = std::get_if<ValueUnit>(&lengthPercentageOrAuto);
+  return valueUnit != nullptr ? valueUnit->toDynamic() : "auto";
+}
+
+static folly::dynamic toDynamic(const BackgroundSize& backgroundSize) {
+  if (const auto* keyword =
+          std::get_if<BackgroundSizeKeyword>(&backgroundSize)) {
+    return *keyword == BackgroundSizeKeyword::Cover ? "cover" : "contain";
+  }
+  const auto& size = std::get<BackgroundSizeLengthPercentage>(backgroundSize);
+  return folly::dynamic::object("x", toDynamic(size.x))("y", toDynamic(size.y));
+}
+
+// JS sends one edge per axis, but the parser keeps the default top and left
+// next to a bottom or right.
+static folly::dynamic toDynamic(const BackgroundPosition& backgroundPosition) {
+  folly::dynamic result = folly::dynamic::object();
+  if (backgroundPosition.bottom.has_value()) {
+    result["bottom"] = backgroundPosition.bottom->toDynamic();
+  } else if (backgroundPosition.top.has_value()) {
+    result["top"] = backgroundPosition.top->toDynamic();
+  }
+  if (backgroundPosition.right.has_value()) {
+    result["right"] = backgroundPosition.right->toDynamic();
+  } else if (backgroundPosition.left.has_value()) {
+    result["left"] = backgroundPosition.left->toDynamic();
+  }
+  return result;
+}
+
+static const char* toString(BackgroundRepeatStyle backgroundRepeatStyle) {
+  switch (backgroundRepeatStyle) {
+    case BackgroundRepeatStyle::Repeat:
+      return "repeat";
+    case BackgroundRepeatStyle::Space:
+      return "space";
+    case BackgroundRepeatStyle::Round:
+      return "round";
+    case BackgroundRepeatStyle::NoRepeat:
+      return "no-repeat";
+  }
+}
+
+static folly::dynamic toDynamic(const BackgroundRepeat& backgroundRepeat) {
+  return folly::dynamic::object("x", toString(backgroundRepeat.x))(
+      "y", toString(backgroundRepeat.y));
+}
+
 ComponentName HostPlatformViewProps::getDiffPropsImplementationTarget() const {
   return "View";
 }
@@ -473,10 +523,6 @@ folly::dynamic HostPlatformViewProps::getDiffProps(
 
   if (focusable != oldProps->focusable) {
     result["focusable"] = focusable;
-  }
-
-  if (hasTVPreferredFocus != oldProps->hasTVPreferredFocus) {
-    result["hasTVPreferredFocus"] = hasTVPreferredFocus;
   }
 
   if (needsOffscreenAlphaCompositing !=
@@ -532,7 +578,8 @@ folly::dynamic HostPlatformViewProps::getDiffProps(
   }
 
   if (shadowColor != oldProps->shadowColor) {
-    result["shadowColor"] = *shadowColor;
+    result["shadowColor"] =
+        shadowColor ? folly::dynamic(*shadowColor) : folly::dynamic(nullptr);
   }
 
   if (shadowOpacity != oldProps->shadowOpacity) {
@@ -563,6 +610,10 @@ folly::dynamic HostPlatformViewProps::getDiffProps(
     result["onLayout"] = onLayout;
   }
 
+  if (onSafeAreaInsetsChange != oldProps->onSafeAreaInsetsChange) {
+    result["experimental_onSafeAreaInsetsChange"] = onSafeAreaInsetsChange;
+  }
+
   if (zIndex != oldProps->zIndex) {
     result["zIndex"] =
         zIndex.has_value() ? zIndex.value() : folly::dynamic(nullptr);
@@ -578,6 +629,18 @@ folly::dynamic HostPlatformViewProps::getDiffProps(
 
   if (backgroundImage != oldProps->backgroundImage) {
     result["backgroundImage"] = toDynamic(backgroundImage);
+  }
+
+  if (backgroundSize != oldProps->backgroundSize) {
+    result["backgroundSize"] = toDynamic(backgroundSize);
+  }
+
+  if (backgroundPosition != oldProps->backgroundPosition) {
+    result["backgroundPosition"] = toDynamic(backgroundPosition);
+  }
+
+  if (backgroundRepeat != oldProps->backgroundRepeat) {
+    result["backgroundRepeat"] = toDynamic(backgroundRepeat);
   }
 
   if (mixBlendMode != oldProps->mixBlendMode) {

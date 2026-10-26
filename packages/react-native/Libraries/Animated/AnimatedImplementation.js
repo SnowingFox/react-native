@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @flow
+ * @flow strict-local
  * @format
  */
 
@@ -127,8 +127,10 @@ const _combineCallbacks = function (
 
 const maybeVectorAnim = function (
   value: AnimatedValue | AnimatedValueXY | AnimatedColor,
-  config: Object,
-  anim: (value: AnimatedValue, config: Object) => CompositeAnimation,
+  // $FlowFixMe[unclear-type]
+  config: any,
+  // $FlowFixMe[unclear-type]
+  anim: (value: AnimatedValue, config: any) => CompositeAnimation,
 ): ?CompositeAnimation {
   if (value instanceof AnimatedValueXY) {
     const configX = {...config};
@@ -184,8 +186,10 @@ const springImpl = function (
     configuration: SpringAnimationConfig,
     callback?: ?EndCallback,
   ): void {
-    callback = _combineCallbacks(callback, configuration);
+    const combinedCallback = _combineCallbacks(callback, configuration);
+    // $FlowFixMe[unclear-type]
     const singleValue: any = animatedValue;
+    // $FlowFixMe[unclear-type]
     const singleConfig: any = configuration;
     singleValue.stopTracking();
     if (configuration.toValue instanceof AnimatedNode) {
@@ -195,11 +199,11 @@ const springImpl = function (
           configuration.toValue,
           SpringAnimation,
           singleConfig,
-          callback,
+          combinedCallback,
         ),
       );
     } else {
-      singleValue.animate(new SpringAnimation(singleConfig), callback);
+      singleValue.animate(new SpringAnimation(singleConfig), combinedCallback);
     }
   };
   return (
@@ -241,8 +245,10 @@ const timingImpl = function (
     configuration: TimingAnimationConfig,
     callback?: ?EndCallback,
   ): void {
-    callback = _combineCallbacks(callback, configuration);
+    const combinedCallback = _combineCallbacks(callback, configuration);
+    // $FlowFixMe[unclear-type]
     const singleValue: any = animatedValue;
+    // $FlowFixMe[unclear-type]
     const singleConfig: any = configuration;
     singleValue.stopTracking();
     if (configuration.toValue instanceof AnimatedNode) {
@@ -252,11 +258,11 @@ const timingImpl = function (
           configuration.toValue,
           TimingAnimation,
           singleConfig,
-          callback,
+          combinedCallback,
         ),
       );
     } else {
-      singleValue.animate(new TimingAnimation(singleConfig), callback);
+      singleValue.animate(new TimingAnimation(singleConfig), combinedCallback);
     }
   };
 
@@ -299,11 +305,13 @@ const decayImpl = function (
     configuration: DecayAnimationConfig,
     callback?: ?EndCallback,
   ): void {
-    callback = _combineCallbacks(callback, configuration);
+    const combinedCallback = _combineCallbacks(callback, configuration);
+    // $FlowFixMe[unclear-type]
     const singleValue: any = animatedValue;
+    // $FlowFixMe[unclear-type]
     const singleConfig: any = configuration;
     singleValue.stopTracking();
-    singleValue.animate(new DecayAnimation(singleConfig), callback);
+    singleValue.animate(new DecayAnimation(singleConfig), combinedCallback);
   };
 
   return (
@@ -551,9 +559,9 @@ const loopImpl = function (
 };
 
 function forkEventImpl(
-  event: ?AnimatedEvent | ?Function,
-  listener: Function,
-): AnimatedEvent | Function {
+  event: ?AnimatedEvent | ?LegacyFunction,
+  listener: LegacyFunction,
+): AnimatedEvent | LegacyFunction {
   if (!event) {
     return listener;
   } else if (event instanceof AnimatedEvent) {
@@ -568,18 +576,23 @@ function forkEventImpl(
 }
 
 function unforkEventImpl(
-  event: ?AnimatedEvent | ?Function,
-  listener: Function,
+  event: ?AnimatedEvent | ?LegacyFunction,
+  listener: LegacyFunction,
 ): void {
   if (event && event instanceof AnimatedEvent) {
     event.__removeListener(listener);
   }
 }
 
-const eventImpl = function <T>(
+// NOTE: With `useNativeDriver: true` this returns an `AnimatedEvent` instance
+// rather than a callable handler. That object is only ever meant to be handed
+// straight back to an animated component's event prop, so the declared type
+// describes the handler shape both branches are consumed as.
+const eventImpl: <T>(
   argMapping: ReadonlyArray<?Mapping>,
   config: EventConfig<T>,
-): any {
+  // $FlowFixMe[unclear-type]
+) => (...args: Array<any>) => void = function (argMapping, config): any {
   const animatedEvent = new AnimatedEvent(argMapping, config);
   if (animatedEvent.__isNative) {
     return animatedEvent;

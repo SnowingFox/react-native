@@ -6,6 +6,9 @@
  */
 
 #pragma once
+
+#include <react/cxxstableapi/PrivateGuard.h>
+
 #include <memory>
 #include "NativeModulePerfLogger.h"
 

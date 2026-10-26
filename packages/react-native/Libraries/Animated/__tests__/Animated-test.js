@@ -12,13 +12,13 @@ import * as React from 'react';
 
 const {PlatformColor} = require('../../StyleSheet/PlatformColorValueTypes');
 let Animated = require('../Animated').default;
-const AnimatedProps = require('../nodes/AnimatedProps').default;
-const {
+let AnimatedProps = require('../nodes/AnimatedProps').default;
+let {
   create,
   unmount,
   update,
 } = require('@react-native/jest-preset/jest/renderer');
-const TestRenderer = require('react-test-renderer');
+let TestRenderer = require('react-test-renderer');
 
 // WORKAROUND: `jest.runAllTicks` skips tasks scheduled w/ `queueMicrotask`.
 function mockQueueMicrotask() {
@@ -37,6 +37,16 @@ function mockQueueMicrotask() {
 describe('Animated', () => {
   beforeEach(() => {
     jest.resetModules();
+    // Reload after the reset, so that Animated and the renderer share a copy
+    // of React.
+    Animated = require('../Animated').default;
+    AnimatedProps = require('../nodes/AnimatedProps').default;
+    ({
+      create,
+      unmount,
+      update,
+    } = require('@react-native/jest-preset/jest/renderer'));
+    TestRenderer = require('react-test-renderer');
   });
 
   mockQueueMicrotask();
@@ -1101,6 +1111,39 @@ describe('Animated', () => {
       value1.removeAllListeners();
       value1.setValue(7);
       expect(listener.mock.calls.length).toBe(4);
+    });
+
+    it('should keep listeners when the last attached node detaches', () => {
+      const value1 = new Animated.Value(0);
+      const listener = jest.fn();
+      value1.addListener(listener);
+
+      const node = new AnimatedProps({style: {opacity: value1}}, () => {});
+      node.__attach();
+      node.__detach();
+
+      expect(value1.__getChildren().length).toBe(0);
+      expect(value1.hasListeners()).toBe(true);
+
+      value1.setValue(42);
+      expect(listener).toBeCalledWith({value: 42});
+      expect(listener.mock.calls.length).toBe(1);
+    });
+
+    it('should keep listeners when a bound component unmounts', async () => {
+      const value1 = new Animated.Value(0);
+      const listener = jest.fn();
+      value1.addListener(listener);
+
+      const root = await create(
+        <Animated.View style={{transform: [{translateX: value1}]}} />,
+      );
+      await unmount(root);
+      jest.runAllTicks();
+
+      value1.setValue(42);
+      expect(listener).toBeCalledWith({value: 42});
+      expect(listener.mock.calls.length).toBe(1);
     });
   });
 

@@ -7,8 +7,11 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <memory>
 
+#include <React/Debug.h>
 #include <react/renderer/attributedstring/AttributedString.h>
 
 namespace facebook::react {
@@ -34,6 +37,7 @@ class AttributedStringBox final {
    * Custom explicit constructors.
    */
   explicit AttributedStringBox(const AttributedString &value);
+  explicit AttributedStringBox(AttributedString &&value);
   explicit AttributedStringBox(std::shared_ptr<void> opaquePointer);
 
   /*

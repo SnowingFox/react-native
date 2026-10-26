@@ -7,12 +7,14 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #ifndef RCT_REMOVE_LEGACY_MODULE_INTEROP
 
 #import <string>
 #import <vector>
 
-#import <ReactCommon/TurboModule.h>
+#import <React/NativeModuleCore.h>
 #import <jsi/jsi.h>
 
 #import "RCTTurboModule.h"
@@ -75,7 +77,8 @@ class JSI_EXPORT ObjCInteropTurboModule : public ObjCTurboModule {
       const jsi::Value &arg,
       size_t i,
       NSInvocation *inv,
-      NSMutableArray *retainedObjectsForInvocation) override;
+      NSMutableArray *retainedObjectsForInvocation,
+      bool mustCopyBytes) override;
 
  private:
   std::vector<MethodDescriptor> methodDescriptors_;

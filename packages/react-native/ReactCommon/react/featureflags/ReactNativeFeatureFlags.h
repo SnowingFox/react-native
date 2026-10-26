@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @generated SignedSource<<196ba25b807fd064ca6150c7d2cd741c>>
+ * @generated SignedSource<<b830327c98c52cf294d5a881ef4733a7>>
  */
 
 /**
@@ -18,6 +18,8 @@
  */
 
 #pragma once
+
+#include <react/cxxstableapi/PrivateGuard.h>
 
 #include <react/featureflags/ReactNativeFeatureFlagsAccessor.h>
 #include <react/featureflags/ReactNativeFeatureFlagsProvider.h>
@@ -60,9 +62,24 @@ class ReactNativeFeatureFlags {
   RN_EXPORT static bool defaultTextToOverflowHidden();
 
   /**
+   * When enabled, iOS TextInput applies edits that JS transforms (e.g. maxLength truncation) incrementally after the UIKit text change delegate call returns, avoiding synchronous text and selection rewrites that can deadlock UIKeyboardTaskQueue.
+   */
+  RN_EXPORT static bool deferTextInputTruncationIOS();
+
+  /**
    * Dispatch view commands in mount item order.
    */
   RN_EXPORT static bool disableEarlyViewCommandExecution();
+
+  /**
+   * Make the batched-event-dispatch Choreographer frame callback one-shot on Android instead of re-posting itself every frame
+   */
+  RN_EXPORT static bool disableIdleEventDispatchFrameCallbackRearmAndroid();
+
+  /**
+   * Stop re-arming the DISPATCH_UI Choreographer frame callback at vsync rate while no mount items are pending on Android; queueing new items re-arms it
+   */
+  RN_EXPORT static bool disableIdleMountItemFrameCallbackRearmAndroid();
 
   /**
    * Force disable view preallocation for images triggered from createNode off the main thread on Android
@@ -100,14 +117,19 @@ class ReactNativeFeatureFlags {
   RN_EXPORT static bool enableAccumulatedUpdatesInRawPropsAndroid();
 
   /**
-   * When enabled, Android Text measurement and rendering respects the system Bold text accessibility setting via `Configuration.fontWeightAdjustment`.
+   * When enabled, a View with reduced opacity that contains an elevated descendant is composited offscreen so the elevation shadow fades uniformly instead of rendering as banded per-primitive alpha.
    */
-  RN_EXPORT static bool enableAndroidFontWeightAdjustment();
+  RN_EXPORT static bool enableAndroidAutoOffscreenCompositingForElevation();
 
   /**
    * Enables various optimizations throughout the path of measuring text on Android.
    */
   RN_EXPORT static bool enableAndroidTextMeasurementOptimizations();
+
+  /**
+   * Runs multi-source image disk-cache checks asynchronously on Android.
+   */
+  RN_EXPORT static bool enableAsyncDiskCacheCheckInMultiSourceImageAndroid();
 
   /**
    * Feature flag to enable the new bridgeless architecture.
@@ -145,9 +167,14 @@ class ReactNativeFeatureFlags {
   RN_EXPORT static bool enableExclusivePropsUpdateAndroid();
 
   /**
-   * Enables Fabric commit branching to fix starvation problems and atomic JS updates.
+   * Enables Fabric commit branching to fix atomic JS updates.
    */
   RN_EXPORT static bool enableFabricCommitBranching();
+
+  /**
+   * Enables Fabric commit branching merge to happen on the main thread to fix starvation problems.
+   */
+  RN_EXPORT static bool enableFabricCommitBranchingMergeOnMainThread();
 
   /**
    * This feature flag enables logs for Fabric.
@@ -158,6 +185,11 @@ class ReactNativeFeatureFlags {
    * Enables CSS Flexbox §4.5 automatic minimum sizing under strict layout conformance. When enabled, a flex item with an undefined main-axis `min-width`/`min-height` under strict conformance receives a content-derived minimum size (per spec) instead of an undefined (0) minimum. Defaults off so the behaviour can be ramped independently of strict conformance.
    */
   RN_EXPORT static bool enableFlexboxAutoMinSizeInStrictMode();
+
+  /**
+   * When mount items are queued while MountItemDispatcher is already dispatching on Android (e.g. from a synchronous state update), dispatch them in the same frame instead of deferring them to the next one.
+   */
+  RN_EXPORT static bool enableFollowUpMountItemDispatchAndroid();
 
   /**
    * Enables font scale changes updating layout for measurable nodes.
@@ -195,6 +227,11 @@ class ReactNativeFeatureFlags {
   RN_EXPORT static bool enableImmediateUpdateModeForContentOffsetChanges();
 
   /**
+   * When enabled, ReactNativeElement and ReadOnlyText expose the public EventTarget API (addEventListener, removeEventListener, dispatchEvent). When disabled, those methods are removed from those final classes.
+   */
+  RN_EXPORT static bool enableImperativeEvents();
+
+  /**
    * Enable ref.focus() and ref.blur() for all views, not just TextInput.
    */
   RN_EXPORT static bool enableImperativeFocus();
@@ -230,7 +267,7 @@ class ReactNativeFeatureFlags {
   RN_EXPORT static bool enableModuleArgumentNSNullConversionIOS();
 
   /**
-   * When enabled, Android mounts transactions with the pull model (like iOS): the commit thread no longer pulls and builds the mount batch in schedulerShouldRenderTransactions. Instead the UI thread pulls the transaction itself via a PullTransactionMountItem enqueued in the MountItemDispatcher, builds the IntBufferBatchMountItem, and applies it synchronously. Requires `enableAccumulatedUpdatesInRawPropsAndroid` to be enabled as well, since a single pull may collapse several commits into one diff and therefore needs complete accumulated rawProps; when used together with Props 2.0, also enable `enableExclusivePropsUpdateAndroid` and `enablePropsUpdateReconciliationAndroid`.
+   * When enabled, Android mounts transactions with the pull model (like iOS): the commit thread no longer pulls and builds the mount batch in schedulerShouldRenderTransactions. Instead the UI thread pulls the transaction itself at its next mount dispatch, builds the IntBufferBatchMountItem, and applies it synchronously. Requires `enableAccumulatedUpdatesInRawPropsAndroid` to be enabled as well, since a single pull may collapse several commits into one diff and therefore needs complete accumulated rawProps; when used together with Props 2.0, also enable `enableExclusivePropsUpdateAndroid` and `enablePropsUpdateReconciliationAndroid`.
    */
   RN_EXPORT static bool enableMountingCoordinatorPullModelAndroid();
 
@@ -245,6 +282,11 @@ class ReactNativeFeatureFlags {
   RN_EXPORT static bool enableNativeCSSParsing();
 
   /**
+   * When enabled together with `enableAccumulatedUpdatesInRawPropsAndroid`, the Insert of a preallocated view only sends the difference between the props the view was preallocated with and the inserted props, instead of sending all props again on every Insert.
+   */
+  RN_EXPORT static bool enablePreallocatedPropsDiffOnInsertAndroid();
+
+  /**
    * Enables caching text layout artifacts for later reuse
    */
   RN_EXPORT static bool enablePreparedTextLayout();
@@ -255,14 +297,9 @@ class ReactNativeFeatureFlags {
   RN_EXPORT static bool enablePropsUpdateReconciliationAndroid();
 
   /**
-   * When enabled, RuntimeScheduler_Modern clears pending tasks and rendering updates before handling an error.
+   * Enables the ResizeObserver Web API in React Native.
    */
-  RN_EXPORT static bool enableRuntimeSchedulerQueueClearingOnError();
-
-  /**
-   * Gates a defensive guard around Scheduler::uiManagerDidDispatchCommand and uiManagerDidFinishTransaction that prevents queued rendering-update lambdas from dereferencing the SchedulerDelegate after it has been destroyed (use-after-free).
-   */
-  RN_EXPORT static bool enableSchedulerDelegateInvalidation();
+  RN_EXPORT static bool enableResizeObserverByDefault();
 
   /**
    * When enabled, it will use SwiftUI for filter effects like blur on iOS.
@@ -305,14 +342,19 @@ class ReactNativeFeatureFlags {
   RN_EXPORT static bool enableVirtualViewContainerStateExperimental();
 
   /**
-   * Fix incorrect parentTag passed as parentTagForUpdate in the unflatten-unflatten branch of calculateShadowViewMutationsFlattener, which causes UPDATE mutations to reference a parent being created in the same batch.
+   * Prevents a borderless ripple feedback underlay from projecting the entire view background on Android, which could hide the background and ripple.
    */
-  RN_EXPORT static bool fixDifferentiatorParentTagForUnflattenCase();
+  RN_EXPORT static bool fixBorderlessRippleAndroid();
 
   /**
    * Uses the default event priority instead of the discreet event priority by default when dispatching events from Fabric to React.
    */
   RN_EXPORT static bool fixMappingOfEventPrioritiesBetweenFabricAndReact();
+
+  /**
+   * Re-measures text and re-sends padding and overflow insets to mounted views when the pixel density changes, so text and padded views do not keep sizes from the old density.
+   */
+  RN_EXPORT static bool fixTextLayoutOnPixelDensityChange();
 
   /**
    * Fix flex basis computation to not apply FitContent constraint in the main axis for non-measure container nodes, preventing unnecessary re-measurement in scroll containers.
@@ -345,7 +387,12 @@ class ReactNativeFeatureFlags {
   RN_EXPORT static bool fuseboxWebSocketEventsEnabled();
 
   /**
-   * When enabled, uses optimized platform-specific paths to apply animated props synchronously. On Android, this uses a batched int/double buffer protocol with a single JNI call. On iOS, this passes AnimatedProps directly through the delegate chain and applies them via cloneProps, avoiding the folly::dynamic round-trip.
+   * Keep JS timers running on Android while the React host is paused, stopping them only when the React instance is destroyed. Matches iOS, where timers do not depend on host lifecycle.
+   */
+  RN_EXPORT static bool keepTimersRunningWhileHostPausedAndroid();
+
+  /**
+   * When enabled, uses optimized platform-specific paths to apply animated props synchronously. On Android, this uses a batched int/double buffer protocol with a single JNI call. Other platforms apply the props of each view through the existing synchronous update.
    */
   RN_EXPORT static bool optimizedAnimatedPropUpdates();
 
@@ -398,6 +445,11 @@ class ReactNativeFeatureFlags {
    * Skip activity identity assertion in ReactHostImpl::onHostPause()
    */
   RN_EXPORT static bool skipActivityIdentityAssertionOnHostPause();
+
+  /**
+   * When a node changes, the differ leaves out its children that are unchanged in both trees instead of describing and comparing them.
+   */
+  RN_EXPORT static bool skipUnchangedChildrenInDifferentiator();
 
   /**
    * Override getClipBounds on Android views to return the padding box when overflow is hidden
@@ -453,6 +505,11 @@ class ReactNativeFeatureFlags {
    * In Bridgeless mode, should legacy NativeModules use the TurboModule system?
    */
   RN_EXPORT static bool useTurboModuleInterop();
+
+  /**
+   * Keeps the window density in the screen display metrics instead of the physical display density, so text is measured at the density the window renders at.
+   */
+  RN_EXPORT static bool useWindowDensityForDisplayMetricsAndroid();
 
   /**
    * Outset the culling context frame with the provided ratio. The culling context frame size will be outset by width * ratio on the left and right, and height * ratio on the top and bottom.

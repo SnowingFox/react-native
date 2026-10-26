@@ -7,17 +7,15 @@
 
 #pragma once
 
-#include <react/renderer/core/Props.h>
-#include <react/renderer/graphics/Color.h>
+#include <react/cxxstableapi/FrameworksGuard.h>
 
+#include <React/Graphics.h>
+#include <React/ImageManager.h>
+#include <React/RendererCore.h>
 #include <react/renderer/attributedstring/TextAttributes.h>
 #include <react/renderer/attributedstring/conversions.h>
 #include <react/renderer/components/textinput/BaseTextInputProps.h>
 #include <react/renderer/components/textinput/basePrimitives.h>
-#include <react/renderer/core/PropsParserContext.h>
-#include <react/renderer/core/propsConversions.h>
-#include <react/renderer/graphics/Color.h>
-#include <react/renderer/imagemanager/primitives.h>
 #include <unordered_map>
 
 namespace facebook::react {
@@ -103,7 +101,7 @@ class AndroidTextInputProps final : public BaseTextInputProps {
   AndroidTextInputTextShadowOffsetStruct textShadowOffset{};
   Float lineHeight{0.0};
   std::string textTransform{};
-  SharedColor color{0};
+  SharedColor color{};
   Float letterSpacing{0.0};
   Float fontSize{0.0};
   std::string textAlign{};

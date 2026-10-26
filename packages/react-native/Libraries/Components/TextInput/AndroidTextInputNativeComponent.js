@@ -24,7 +24,10 @@ import type {TextInputNativeCommands} from './TextInputNativeCommands';
 
 import * as NativeComponentRegistry from '../../NativeComponent/NativeComponentRegistry';
 import codegenNativeCommands from '../../Utilities/codegenNativeCommands';
-import {colorAttribute} from '../View/ReactNativeStyleAttributes';
+import {
+  colorAttribute,
+  fontVariationSettingsAttribute,
+} from '../View/ReactNativeStyleAttributes';
 
 export type KeyboardType =
   // Cross Platform
@@ -531,20 +534,6 @@ export type AndroidTextInputNativeProps = Readonly<{
   selectTextOnFocus?: ?boolean,
 
   /**
-   * If `true`, the text field will blur when submitted.
-   * The default value is true for single-line fields and false for
-   * multiline fields. Note that for multiline fields, setting `blurOnSubmit`
-   * to `true` means that pressing return will blur the field and trigger the
-   * `onSubmitEditing` event instead of inserting a newline into the field.
-   *
-   * @deprecated
-   * Note that `submitBehavior` now takes the place of `blurOnSubmit` and will
-   * override any behavior defined by `blurOnSubmit`.
-   * @see submitBehavior
-   */
-  blurOnSubmit?: ?boolean,
-
-  /**
    * When the return key is pressed,
    *
    * For single line inputs:
@@ -715,7 +704,7 @@ export const __INTERNAL_VIEW_CONFIG: PartialViewConfig = {
     includeFontPadding: true,
     fontWeight: true,
     fontFamily: true,
-    fontVariationSettings: true,
+    fontVariationSettings: fontVariationSettingsAttribute,
     allowFontScaling: true,
     onSelectionChange: true,
     mostRecentEventCount: true,

@@ -36,7 +36,7 @@ Pod::Spec.new do |s|
   resolve_use_frameworks(s, header_mappings_dir: "../..", module_name: "React_RuntimeCore")
 
   s.dependency "React-jsiexecutor"
-  s.dependency "React-cxxreact"
+  add_dependency(s, "React-cxxreact")
   add_dependency(s, "React-runtimeexecutor", :additional_framework_paths => ["platform/ios"])
   s.dependency "React-jsi"
   s.dependency "React-jserrorhandler"
@@ -52,5 +52,8 @@ Pod::Spec.new do |s|
   add_rncore_dependency(s)
 
   s.dependency "React-jsinspector"
+  s.dependency "React-cxxstableapi"
   add_dependency(s, "React-jsitooling", :framework_name => "JSITooling")
+
+  mark_as_react_native_build(s)
 end

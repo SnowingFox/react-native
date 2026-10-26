@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
 #include <react/renderer/components/text/BaseParagraphComponentDescriptor.h>
 #include <react/renderer/components/text/SelectableParagraphShadowNode.h>
 

@@ -7,17 +7,19 @@
 
 #pragma once
 
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
 #include <array>
 #include <cmath>
 #include <memory>
 #include <vector>
 
-#include <react/debug/react_native_assert.h>
+#include <React/Debug.h>
+#include <React/Graphics.h>
+#include <React/RendererDebug.h>
 #include <react/renderer/core/LayoutMetrics.h>
 #include <react/renderer/core/ShadowNode.h>
 #include <react/renderer/core/ShadowNodeFragment.h>
-#include <react/renderer/debug/DebugStringConvertible.h>
-#include <react/renderer/graphics/Transform.h>
 
 namespace facebook::react {
 
@@ -41,6 +43,11 @@ class LayoutableShadowNode : public ShadowNode {
     bool includeTransform{true};
     bool includeViewportOffset{false};
     bool enableOverflowClipping{false};
+    // When enableOverflowClipping is true, also clip against the ancestor
+    // passed as the reference node. IntersectionObserver sets this false:
+    // the spec clips ancestors *until* the root, then intersects with the
+    // rootMargin-expanded root intersection rectangle.
+    bool clipSpecifiedAncestor{true};
   };
 
   using UnsharedList = std::vector<LayoutableShadowNode *>;
@@ -110,6 +117,11 @@ class LayoutableShadowNode : public ShadowNode {
    */
   LayoutMetrics getLayoutMetrics() const;
 
+  const LayoutableShadowNode *asLayoutable() const override
+  {
+    return this;
+  }
+
   /*
    * Returns a transform object that represents transformations that will/should
    * be applied on top of regular layout metrics by mounting layer.
@@ -163,7 +175,7 @@ class LayoutableShadowNode : public ShadowNode {
 #pragma mark - DebugStringConvertible
 
 #if RN_DEBUG_STRING_CONVERTIBLE
-  SharedDebugStringConvertibleList getDebugProps() const;
+  SharedDebugStringConvertibleList getDebugProps() const override;
 #endif
 
   LayoutMetrics layoutMetrics_;

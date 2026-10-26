@@ -13,6 +13,7 @@
 #import <objc/runtime.h>
 #import <zlib.h>
 #import <atomic>
+#import <cmath>
 #import <vector>
 
 #import <UIKit/UIKit.h>
@@ -390,7 +391,11 @@ CGSize RCTScreenSize(void)
 
   if (CGSizeEqualToSize(size, CGSizeZero)) {
     RCTUnsafeExecuteOnMainQueueSync(^{
-      CGSize screenSize = [UIScreen mainScreen].bounds.size;
+      UIScreen *screen = RCTKeyWindow().screen;
+      if (screen == nil) {
+        screen = UIScreen.screens.firstObject;
+      }
+      CGSize screenSize = screen.bounds.size;
       size = CGSizeMake(MIN(screenSize.width, screenSize.height), MAX(screenSize.width, screenSize.height));
       cachedSize.store(size, std::memory_order_relaxed);
     });
@@ -433,20 +438,20 @@ CGSize RCTSwitchSize(void)
 CGFloat RCTRoundPixelValue(CGFloat value)
 {
   CGFloat scale = RCTScreenScale();
-  return round(value * scale) / scale;
+  return std::round(value * scale) / scale;
 }
 
 CGFloat RCTCeilPixelValue(CGFloat value)
 {
   CGFloat scale = RCTScreenScale();
-  return ceil(value * scale) / scale;
+  return std::ceil(value * scale) / scale;
 }
 
 CGSize RCTSizeInPixels(CGSize pointSize, CGFloat scale)
 {
   return (CGSize){
-      ceil(pointSize.width * scale),
-      ceil(pointSize.height * scale),
+      std::ceil(pointSize.width * scale),
+      std::ceil(pointSize.height * scale),
   };
 }
 
@@ -638,11 +643,57 @@ UIWindow *__nullable RCTKeyWindow(void)
     // Calling keyWindow on a UIScene which is not a UIWindowScene can cause a crash
     UIWindowScene *windowScene = (UIWindowScene *)sceneToUse;
     if (@available(iOS 15.0, tvOS 15.0, *)) {
-      return windowScene.keyWindow;
+      UIWindow *keyWindow = windowScene.keyWindow;
+      if (keyWindow != nil) {
+        return keyWindow;
+      }
+    }
+    UIWindow *window = nil;
+    for (window in windowScene.windows) {
+      if (window.isKeyWindow) {
+        return window;
+      }
     }
   }
 
+  // Fallback for apps still on the legacy UIApplicationDelegate lifecycle (no
+  // SceneDelegate / no UIApplicationSceneManifest, or scene migration disabled).
+  // Their key window is created and owned by the app delegate and is not attached
+  // to a foreground UIWindowScene, so the scene-based lookup above finds nothing.
+  // This diff moved several call sites from `delegate.window` to RCTKeyWindow(),
+  // so without this fallback RCTKeyWindow() returns nil for those apps and RN's
+  // window/screen/dimension resolution (RCTViewportSize, RCTDeviceInfo,
+  // RCTPresentedViewController, …) breaks — the RN UI never renders.
+  //
+  // Gate this on the legacy lifecycle: scene-based apps (UIApplicationSceneManifest
+  // present) own their window through a UIWindowScene, and the app delegate's
+  // `window` there is nil or a stale/secondary window. Falling back to it for a
+  // scene app returns the wrong window instead of the correct `nil`, regressing
+  // scene-based hosts (e.g. RNTester's SceneDelegate scheme). Keep the fallback
+  // strictly for the legacy path.
+  if (!RCTIsSceneDelegateApp()) {
+    return RCTSharedApplication().delegate.window;
+  }
+
   return nil;
+}
+
+BOOL RCTIsSceneDelegateApp(void)
+{
+  if (@available(iOS 13.0, *)) {
+    NSDictionary *sceneManifest = [[NSBundle mainBundle] infoDictionary][@"UIApplicationSceneManifest"];
+
+    if (sceneManifest != nil) {
+      NSDictionary *sceneConfigurations = sceneManifest[@"UISceneConfigurations"];
+      if (sceneConfigurations != nil && sceneConfigurations.count > 0) {
+        return YES;
+      }
+    }
+
+    return NO;
+  }
+
+  return NO;
 }
 
 #if !TARGET_OS_TV

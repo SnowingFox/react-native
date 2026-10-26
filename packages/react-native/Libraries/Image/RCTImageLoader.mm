@@ -85,7 +85,6 @@ static NSError *addResponseHeadersToError(NSError *originalError, NSHTTPURLRespo
   __weak id<RCTImageRedirectProtocol> _redirectDelegate;
 }
 
-@synthesize bridge = _bridge;
 @synthesize moduleRegistry = _moduleRegistry;
 @synthesize maxConcurrentLoadingTasks = _maxConcurrentLoadingTasks;
 @synthesize maxConcurrentDecodingTasks = _maxConcurrentDecodingTasks;
@@ -134,13 +133,8 @@ RCT_EXPORT_MODULE()
 
     _URLRequestQueue = dispatch_queue_create("com.facebook.react.ImageLoaderURLRequestQueue", DISPATCH_QUEUE_SERIAL);
 
-    // Get loaders, sorted in reverse priority order (highest priority first)
-    if (_loadersProvider != nil) {
-      _loaders = _loadersProvider(self.moduleRegistry);
-    } else {
-      RCTAssert(_bridge, @"Trying to find RCTImageURLLoaders and bridge not set.");
-      _loaders = [_bridge modulesConformingToProtocol:@protocol(RCTImageURLLoader)];
-    }
+    RCTAssert(_loadersProvider != nil, @"Trying to find RCTImageURLLoaders and loaders provider not set.");
+    _loaders = _loadersProvider(self.moduleRegistry);
     _loaders =
         [_loaders sortedArrayUsingComparator:^NSComparisonResult(id<RCTImageURLLoader> a, id<RCTImageURLLoader> b) {
           float priorityA = [a respondsToSelector:@selector(loaderPriority)] ? [a loaderPriority] : 0;
@@ -154,13 +148,8 @@ RCT_EXPORT_MODULE()
           }
         }];
 
-    // Get decoders, sorted in reverse priority order (highest priority first)
-    if (_decodersProvider != nil) {
-      _decoders = _decodersProvider(self.moduleRegistry);
-    } else {
-      RCTAssert(_bridge, @"Trying to find RCTImageDataDecoders and bridge not set.");
-      _decoders = [_bridge modulesConformingToProtocol:@protocol(RCTImageDataDecoder)];
-    }
+    RCTAssert(_decodersProvider != nil, @"Trying to find RCTImageDataDecoders and decoders provider not set.");
+    _decoders = _decodersProvider(self.moduleRegistry);
     _decoders = [_decoders
         sortedArrayUsingComparator:^NSComparisonResult(id<RCTImageDataDecoder> a, id<RCTImageDataDecoder> b) {
           float priorityA = [a respondsToSelector:@selector(decoderPriority)] ? [a decoderPriority] : 0;
@@ -186,19 +175,25 @@ RCT_EXPORT_MODULE()
 
 - (id<RCTImageCache>)imageCache
 {
-  if (!_imageCache) {
-    // set up with default cache
-    _imageCache = [RCTImageCache new];
+  // Callers reach this from the URL request queue, the JS thread and the main
+  // queue, so the lazy initialization has to be serialized.
+  @synchronized(self) {
+    if (_imageCache == nil) {
+      // set up with default cache
+      _imageCache = [RCTImageCache new];
+    }
+    return _imageCache;
   }
-  return _imageCache;
 }
 
 - (void)setImageCache:(id<RCTImageCache>)cache
 {
-  if (_imageCache) {
-    RCTLogWarn(@"RCTImageCache was already set and has now been overridden.");
+  @synchronized(self) {
+    if (_imageCache != nil) {
+      RCTLogWarn(@"RCTImageCache was already set and has now been overridden.");
+    }
+    _imageCache = cache;
   }
-  _imageCache = cache;
 }
 
 - (id<RCTImageURLLoader>)imageURLLoaderForURL:(NSURL *)URL
@@ -309,6 +304,28 @@ static UIImage *RCTResizeImageIfNeeded(UIImage *image, CGSize size, CGFloat scal
   CGAffineTransform transform = RCTTransformFromTargetRect(image.size, targetSize);
   image = RCTTransformImage(image, size, scale, transform);
   return image;
+}
+
+/**
+ * Looks up a decoded image, falling back to the original-size entry that
+ * prefetching writes so that a request for concrete dimensions can reuse it.
+ * The fallback key must stay in sync with the one used by
+ * prefetchImageWithMetadata:queryRootName:rootTag:resolve:reject:.
+ */
+static UIImage *RCTCachedImageForURL(
+    id<RCTImageCache> imageCache,
+    NSString *urlString,
+    CGSize size,
+    CGFloat scale,
+    BOOL clipped,
+    RCTResizeMode resizeMode)
+{
+  UIImage *image = [imageCache imageForUrl:urlString size:size scale:scale resizeMode:resizeMode];
+  if (image != nil) {
+    return image;
+  }
+  image = [imageCache imageForUrl:urlString size:CGSizeZero scale:1 resizeMode:RCTResizeModeStretch];
+  return clipped ? RCTResizeImageIfNeeded(image, size, scale, resizeMode) : image;
 }
 
 /*
@@ -492,6 +509,7 @@ static RCTImageLoaderCancellationBlock RCTLoadImageURLFromLoader(
 - (RCTImageURLLoaderRequest *)_loadImageOrDataWithURLRequest:(NSURLRequest *)request
                                                         size:(CGSize)size
                                                        scale:(CGFloat)scale
+                                                     clipped:(BOOL)clipped
                                                   resizeMode:(RCTResizeMode)resizeMode
                                                     priority:(RCTImageLoaderPriority)priority
                                                  attribution:(const ImageURLLoaderAttribution &)attribution
@@ -542,10 +560,8 @@ static RCTImageLoaderCancellationBlock RCTLoadImageURLFromLoader(
   }
 
   if (cacheResult && partialLoadHandler) {
-    UIImage *image = [[self imageCache] imageForUrl:request.URL.absoluteString
-                                               size:size
-                                              scale:scale
-                                         resizeMode:resizeMode];
+    UIImage *image =
+        RCTCachedImageForURL([self imageCache], request.URL.absoluteString, size, scale, clipped, resizeMode);
     if (image) {
       partialLoadHandler(image);
     }
@@ -662,10 +678,8 @@ static RCTImageLoaderCancellationBlock RCTLoadImageURLFromLoader(
     } else {
       UIImage *image;
       if (cacheResult) {
-        image = [[strongSelf imageCache] imageForUrl:request.URL.absoluteString
-                                                size:size
-                                               scale:scale
-                                          resizeMode:resizeMode];
+        image =
+            RCTCachedImageForURL([strongSelf imageCache], request.URL.absoluteString, size, scale, clipped, resizeMode);
       }
 
       if (image) {
@@ -889,6 +903,7 @@ static RCTImageLoaderCancellationBlock RCTLoadImageURLFromLoader(
   RCTImageURLLoaderRequest *loaderRequest = [self _loadImageOrDataWithURLRequest:imageURLRequest
                                                                             size:size
                                                                            scale:scale
+                                                                         clipped:clipped
                                                                       resizeMode:resizeMode
                                                                         priority:priority
                                                                      attribution:attribution
@@ -1107,6 +1122,7 @@ static RCTImageLoaderCancellationBlock RCTLoadImageURLFromLoader(
   RCTImageURLLoaderRequest *loaderRequest = [self _loadImageOrDataWithURLRequest:imageURLRequest
                                                                             size:CGSizeZero
                                                                            scale:1
+                                                                         clipped:NO
                                                                       resizeMode:RCTResizeModeStretch
                                                                         priority:RCTImageLoaderPriorityImmediate
                                                                      attribution:{}
@@ -1121,18 +1137,22 @@ static RCTImageLoaderCancellationBlock RCTLoadImageURLFromLoader(
   NSMutableDictionary *results = [NSMutableDictionary dictionary];
   for (id request in requests) {
     NSURLRequest *urlRequest = [RCTConvert NSURLRequest:request];
-    if (urlRequest) {
+    NSString *urlString = urlRequest.URL.absoluteString;
+    if (urlRequest != nil && urlString != nil) {
       NSCachedURLResponse *cachedResponse = [NSURLCache.sharedURLCache cachedResponseForRequest:urlRequest];
       if (cachedResponse) {
         if (cachedResponse.storagePolicy == NSURLCacheStorageAllowedInMemoryOnly) {
-          results[urlRequest.URL.absoluteString] = @"memory";
+          results[urlString] = @"memory";
         } else if (NSURLCache.sharedURLCache.currentMemoryUsage == 0) {
           // We can't check whether the file is cached on disk or memory.
           // However, if currentMemoryUsage is disabled, it must be read from disk.
-          results[urlRequest.URL.absoluteString] = @"disk";
+          results[urlString] = @"disk";
         } else {
-          results[urlRequest.URL.absoluteString] = @"disk/memory";
+          results[urlString] = @"disk/memory";
         }
+      } else if (
+          [[self imageCache] imageForUrl:urlString size:CGSizeZero scale:1 resizeMode:RCTResizeModeStretch] != nil) {
+        results[urlString] = @"memory";
       }
     }
   }
@@ -1301,22 +1321,6 @@ static RCTImageLoaderCancellationBlock RCTLoadImageURLFromLoader(
 {
   resolve([self getImageCacheStatus:uris]);
 }
-@end
-
-/**
- * DEPRECATED!! DO NOT USE
- * Instead use `[_bridge moduleForClass:[RCTImageLoader class]]`
- */
-@implementation RCTBridge (RCTImageLoader)
-
-- (RCTImageLoader *)imageLoader
-{
-  RCTLogWarn(
-      @"Calling bridge.imageLoader is deprecated and will not work in newer versions of RN. Please update to the "
-       "moduleForClass API or turboModuleRegistry API.");
-  return [self moduleForClass:[RCTImageLoader class]];
-}
-
 @end
 
 @implementation RCTBridgeProxy (RCTImageLoader)

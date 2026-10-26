@@ -76,6 +76,10 @@ const Components: Array<RNTesterModuleInfo> = [
     category: 'Basic',
   },
   {
+    key: 'SafeAreaInsetsExample',
+    module: require('../examples/SafeAreaInsets/SafeAreaInsetsExample'),
+  },
+  {
     key: 'SafeAreaViewExample',
     module: require('../examples/SafeAreaView/SafeAreaViewExample'),
   },
@@ -381,6 +385,17 @@ const APIs: Array<RNTesterModuleInfo> = (
             key: 'MutationObserver',
             category: 'UI',
             module: require('../examples/MutationObserver/MutationObserverIndex'),
+          },
+        ]
+      : []),
+    // Basic check to detect the availability of the ResizeObserver API.
+    // $FlowExpectedError[cannot-resolve-name]
+    ...(typeof ResizeObserver === 'function'
+      ? [
+          {
+            key: 'ResizeObserver',
+            category: 'UI',
+            module: require('../examples/ResizeObserver/ResizeObserverIndex'),
           },
         ]
       : []),

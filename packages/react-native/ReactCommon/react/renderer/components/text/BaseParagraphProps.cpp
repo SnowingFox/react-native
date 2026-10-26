@@ -84,6 +84,12 @@ void BaseParagraphProps::setProp(
         paDefaults,
         value,
         paragraphAttributes,
+        textWidthMode,
+        "experimental_textWidthMode");
+    REBUILD_FIELD_SWITCH_CASE(
+        paDefaults,
+        value,
+        paragraphAttributes,
         adjustsFontSizeToFit,
         "adjustsFontSizeToFit");
     REBUILD_FIELD_SWITCH_CASE(
@@ -102,12 +108,6 @@ void BaseParagraphProps::setProp(
         paDefaults,
         value,
         paragraphAttributes,
-        maximumFontSize,
-        "maximumFontSize");
-    REBUILD_FIELD_SWITCH_CASE(
-        paDefaults,
-        value,
-        paragraphAttributes,
         includeFontPadding,
         "includeFontPadding");
     REBUILD_FIELD_SWITCH_CASE(
@@ -116,6 +116,10 @@ void BaseParagraphProps::setProp(
         paragraphAttributes,
         android_hyphenationFrequency,
         "android_hyphenationFrequency");
+    REBUILD_FIELD_SWITCH_CASE(
+        paDefaults, value, paragraphAttributes, lineBreak, "lineBreak");
+    REBUILD_FIELD_SWITCH_CASE(
+        paDefaults, value, paragraphAttributes, wordBreak, "wordBreak");
     REBUILD_FIELD_SWITCH_CASE(
         paDefaults,
         value,

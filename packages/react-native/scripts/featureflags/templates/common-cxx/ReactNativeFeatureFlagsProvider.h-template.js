@@ -27,6 +27,8 @@ ${DO_NOT_MODIFY_COMMENT}
 
 #pragma once
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
 namespace facebook::react {
 
 class ReactNativeFeatureFlagsProvider {

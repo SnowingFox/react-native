@@ -7,8 +7,12 @@
 
 #pragma once
 
-#include <react/debug/react_native_assert.h>
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
+#include <cstdint>
+#include <string>
 #include <vector>
+
 #include "MapBuffer.h"
 
 namespace facebook::react {

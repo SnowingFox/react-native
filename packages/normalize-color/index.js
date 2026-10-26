@@ -12,6 +12,8 @@
 
 'use strict';
 
+const cachedColors = new Map();
+
 function normalizeColor(color) {
   if (typeof color === 'number') {
     if (color >>> 0 === color && color >= 0 && color <= 0xffffffff) {
@@ -24,6 +26,23 @@ function normalizeColor(color) {
     return null;
   }
 
+  if (cachedColors.has(color)) {
+    // Map iteration order follows insertion order, so re-inserting on every
+    // hit keeps the least-recently-used entry first.
+    const cachedColor = cachedColors.get(color);
+    cachedColors.delete(color);
+    cachedColors.set(color, cachedColor);
+    return cachedColor;
+  }
+  const normalizedColor = parseColorString(color);
+  if (cachedColors.size >= 1024) {
+    cachedColors.delete(cachedColors.keys().next().value);
+  }
+  cachedColors.set(color, normalizedColor);
+  return normalizedColor;
+}
+
+function parseColorString(color) {
   const matchers = getMatchers();
   let match;
 
@@ -258,22 +277,22 @@ function getMatchers() {
       callWithSlashSeparator(NUMBER, NUMBER, NUMBER, NUMBER);
 
     cachedMatchers = {
-      rgb: new RegExp('rgb(' + rgbRegexPattern + ')'),
-      rgba: new RegExp('rgba(' + rgbRegexPattern + ')'),
-      hsl: new RegExp('hsl' + call(NUMBER, PERCENTAGE, PERCENTAGE)),
+      rgb: new RegExp('^rgb(' + rgbRegexPattern + ')$'),
+      rgba: new RegExp('^rgba(' + rgbRegexPattern + ')$'),
+      hsl: new RegExp('^hsl' + call(NUMBER, PERCENTAGE, PERCENTAGE) + '$'),
       hsla: new RegExp(
-        'hsla(' +
+        '^hsla(' +
           commaSeparatedCall(NUMBER, PERCENTAGE, PERCENTAGE, NUMBER) +
           '|' +
           callWithSlashSeparator(NUMBER, PERCENTAGE, PERCENTAGE, NUMBER) +
-          ')',
+          ')$',
       ),
       hwb: new RegExp(
-        'hwb(' +
+        '^hwb(' +
           callModern(NUMBER, PERCENTAGE, PERCENTAGE) +
           '|' +
           callWithSlashSeparator(NUMBER, PERCENTAGE, PERCENTAGE, NUMBER) +
-          ')',
+          ')$',
       ),
       hex3: /^#([0-9a-fA-F]{1})([0-9a-fA-F]{1})([0-9a-fA-F]{1})$/,
       hex4: /^#([0-9a-fA-F]{1})([0-9a-fA-F]{1})([0-9a-fA-F]{1})([0-9a-fA-F]{1})$/,

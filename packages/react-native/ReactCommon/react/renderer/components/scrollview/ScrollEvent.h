@@ -7,11 +7,16 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/Graphics.h>
+#include <React/RendererCore.h>
+#include <React/RendererDebug.h>
 #include <folly/dynamic.h>
-#include <react/renderer/core/EventPayload.h>
-#include <react/renderer/debug/DebugStringConvertible.h>
-#include <react/renderer/graphics/RectangleEdges.h>
-#include <react/renderer/graphics/Size.h>
+
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace facebook::react {
 
@@ -21,6 +26,7 @@ struct ScrollEvent : public EventPayload {
   EdgeInsets contentInset;
   Size containerSize;
   Float zoomScale{};
+  bool responderIgnoreScroll{false};
 
   /*
    * The time in seconds when the touch occurred or when it was last mutated.

@@ -11,6 +11,7 @@ import android.content.Context
 import android.view.View
 import com.facebook.common.logging.FLog
 import com.facebook.react.bridge.ColorPropConverter
+import com.facebook.react.bridge.DimensionPropConverter
 import com.facebook.react.bridge.Dynamic
 import com.facebook.react.bridge.DynamicFromObject
 import com.facebook.react.bridge.JSApplicationIllegalArgumentException
@@ -18,7 +19,9 @@ import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.uimanager.annotations.ReactProp
 import com.facebook.react.uimanager.annotations.ReactPropGroup
+import com.facebook.yoga.YogaValue
 import java.lang.reflect.Method
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * This class is responsible for holding view manager property setters and is used in a process of
@@ -27,7 +30,8 @@ import java.lang.reflect.Method
 @Suppress("DEPRECATION") // ReactShadowNode is @Deprecated but still required by this cache.
 internal object ViewManagersPropertyCache {
 
-  private val CLASS_PROPS_CACHE: MutableMap<Class<*>, Map<String, PropSetter>> = HashMap()
+  // Used from the JS thread (view configs) and the UI thread (prop updates).
+  private val CLASS_PROPS_CACHE: MutableMap<Class<*>, Map<String, PropSetter>> = ConcurrentHashMap()
   private val EMPTY_PROPS_MAP: MutableMap<String, PropSetter> = HashMap()
 
   @JvmStatic
@@ -192,6 +196,15 @@ internal object ViewManagersPropertyCache {
     }
   }
 
+  private class DimensionPropSetter(prop: ReactProp, setter: Method) :
+      PropSetter(prop, "mixed", setter) {
+
+    // A DimensionValue arrives from JS as either a number (points) or a string
+    // (e.g. "100%"), and is nullable, so the conversion is delegated wholesale.
+    override fun getValueOrDefault(value: Any?, context: Context): Any? =
+        DimensionPropConverter.getDimension(value)
+  }
+
   private class BooleanPropSetter(
       prop: ReactProp,
       setter: Method,
@@ -254,6 +267,18 @@ internal object ViewManagersPropertyCache {
     override fun getValueOrDefault(value: Any?, context: Context): Any? {
       if (value != null) {
         return if (value as Boolean) java.lang.Boolean.TRUE else java.lang.Boolean.FALSE
+      }
+      return null
+    }
+  }
+
+  private class BoxedFloatPropSetter(prop: ReactProp, setter: Method) :
+      PropSetter(prop, "number", setter) {
+
+    override fun getValueOrDefault(value: Any?, context: Context): Any? {
+      if (value != null) {
+        // All numbers from JS are Doubles which can't be simply cast to Float
+        return if (value is Double) value.toFloat() else value as Float
       }
       return null
     }
@@ -333,9 +358,10 @@ internal object ViewManagersPropertyCache {
     // This is to include all the setters from parent classes. Once calculated the result will be
     // stored in CLASS_PROPS_CACHE so that we only scan for @ReactProp annotations once per class.
     @Suppress("UNCHECKED_CAST")
-    val props: MutableMap<String, PropSetter> = HashMap(
-        getNativePropSettersForViewManagerClass(cls.superclass as Class<out ViewManager<*, *>>),
-    )
+    val props: MutableMap<String, PropSetter> =
+        HashMap(
+            getNativePropSettersForViewManagerClass(cls.superclass as Class<out ViewManager<*, *>>),
+        )
     extractPropSettersFromViewManagerClassDefinition(cls, props)
     CLASS_PROPS_CACHE[cls] = props
     return props
@@ -390,8 +416,9 @@ internal object ViewManagersPropertyCache {
         Double::class.javaPrimitiveType ->
             DoublePropSetter(annotation, method, annotation.defaultDouble)
         String::class.java -> StringPropSetter(annotation, method)
-        java.lang.Boolean::class.java -> BoxedBooleanPropSetter(annotation, method)
-        java.lang.Integer::class.java ->
+        Boolean::class.javaObjectType -> BoxedBooleanPropSetter(annotation, method)
+        Float::class.javaObjectType -> BoxedFloatPropSetter(annotation, method)
+        Int::class.javaObjectType ->
             if ("Color" == annotation.customType) {
               BoxedColorPropSetter(annotation, method)
             } else {
@@ -399,6 +426,7 @@ internal object ViewManagersPropertyCache {
             }
         ReadableArray::class.java -> ArrayPropSetter(annotation, method)
         ReadableMap::class.java -> MapPropSetter(annotation, method)
+        YogaValue::class.java -> DimensionPropSetter(annotation, method)
         else ->
             throw RuntimeException(
                 "Unrecognized type: $propTypeClass for method: ${method.declaringClass.name}#${method.name}",
@@ -434,7 +462,7 @@ internal object ViewManagersPropertyCache {
           for (i in names.indices) {
             props[names[i]] = DoublePropSetter(annotation, method, i, annotation.defaultDouble)
           }
-      java.lang.Integer::class.java ->
+      Int::class.javaObjectType ->
           for (i in names.indices) {
             props[names[i]] =
                 if ("Color" == annotation.customType) {

@@ -9,6 +9,7 @@
 #import <XCTest/XCTest.h>
 #import <react/renderer/components/view/ViewProps.h>
 #import <react/renderer/components/view/ViewShadowNode.h>
+#import <react/renderer/graphics/Color.h>
 
 using namespace facebook::react;
 
@@ -142,6 +143,26 @@ static Props::Shared makeViewProps(bool removeClippedSubviews)
   XCTAssertNil(child2.superview);
 }
 
+- (void)testRemoveClippedSubviewsIsKeptOnRecycledView
+{
+  RCTViewComponentView *view = [RCTViewComponentView new];
+  [view updateProps:makeViewProps(true) oldProps:ViewShadowNode::defaultSharedProps()];
+  [view prepareForRecycle];
+
+  // Reused for another view with removeClippedSubviews. Like the mounting layer
+  // does for an Insert, pass no old props: the view diffs against its own.
+  [view updateProps:makeViewProps(true) oldProps:nullptr];
+
+  UIView *child = [UIView new];
+  child.frame = CGRectMake(0, 400, 50, 50);
+  [view mountChildComponentView:(id)child index:0];
+
+  // Clipping is on, so the child is tracked and left for the clipping pass to attach.
+  XCTAssertNil(child.superview);
+  NSMutableArray *reactSubviews = [view valueForKey:@"_reactSubviews"];
+  XCTAssertEqual(reactSubviews.count, 1u);
+}
+
 #pragma mark - hitTest against non-invertible transforms (#50797)
 
 - (void)testHitTestReturnsNilForZeroScaleYView
@@ -181,6 +202,39 @@ static Props::Shared makeViewProps(bool removeClippedSubviews)
 
   view.layer.transform = CATransform3DMakeScale(1, 0, 1);
   XCTAssertNil([view hitTest:CGPointMake(50, 50) withEvent:nil]);
+}
+
+#pragma mark - non-finite transforms
+
+static RCTViewComponentView *makeViewWithTransform(const Transform &transform)
+{
+  RCTViewComponentView *view = [RCTViewComponentView new];
+  auto props = std::make_shared<ViewProps>();
+  props->transform = transform;
+  [view updateProps:props oldProps:ViewShadowNode::defaultSharedProps()];
+  return view;
+}
+
+- (void)testFiniteTransformIsApplied
+{
+  RCTViewComponentView *view = makeViewWithTransform(Transform::Translate(5, 10, 0));
+
+  XCTAssertEqual(view.layer.transform.m41, 5.0);
+  XCTAssertEqual(view.layer.transform.m42, 10.0);
+}
+
+- (void)testTransformWithNaNIsNotApplied
+{
+  RCTViewComponentView *view = makeViewWithTransform(Transform::Translate(NAN, 10, 0));
+
+  XCTAssertTrue(CATransform3DIsIdentity(view.layer.transform));
+}
+
+- (void)testTransformWithInfinityIsNotApplied
+{
+  RCTViewComponentView *view = makeViewWithTransform(Transform::Scale(INFINITY, 1, 1));
+
+  XCTAssertTrue(CATransform3DIsIdentity(view.layer.transform));
 }
 
 #pragma mark - Full Keyboard Access focusability
@@ -235,6 +289,82 @@ static RCTViewComponentView *makeViewWithRole(bool accessible, const std::string
 {
   RCTViewComponentView *view = makeViewWithRole(true, "");
   XCTAssertFalse(view.canBecomeFocused);
+}
+
+#pragma mark - accessibilityValue for expanded state
+
+static RCTViewComponentView *makeViewWithExpandedState(std::optional<bool> expanded)
+{
+  RCTViewComponentView *view = [RCTViewComponentView new];
+  auto props = std::make_shared<ViewProps>();
+  props->accessible = true;
+  props->accessibilityRole = "button";
+  AccessibilityState accessibilityState;
+  accessibilityState.expanded = expanded;
+  props->accessibilityState = accessibilityState;
+  [view updateProps:props oldProps:ViewShadowNode::defaultSharedProps()];
+  return view;
+}
+
+- (void)testAccessibilityValueAnnouncesExpanded
+{
+  RCTViewComponentView *view = makeViewWithExpandedState(true);
+  XCTAssertEqualObjects(view.accessibilityValue, @"expanded");
+}
+
+- (void)testAccessibilityValueAnnouncesCollapsed
+{
+  RCTViewComponentView *view = makeViewWithExpandedState(false);
+  XCTAssertEqualObjects(view.accessibilityValue, @"collapsed");
+}
+
+- (void)testAccessibilityValueIsNilWithoutExpandedState
+{
+  RCTViewComponentView *view = makeViewWithExpandedState(std::nullopt);
+  XCTAssertNil(view.accessibilityValue);
+}
+
+#pragma mark - outline style on square corners (#57841)
+
+static RCTViewComponentView *makeViewWithOutlineStyle(OutlineStyle outlineStyle)
+{
+  RCTViewComponentView *view = [RCTViewComponentView new];
+  view.frame = CGRectMake(0, 0, 100, 100);
+
+  auto props = std::make_shared<ViewProps>();
+  props->outlineWidth = 8;
+  props->outlineColor = colorFromRGBA(255, 165, 0, 255);
+  props->outlineStyle = outlineStyle;
+
+  [view updateProps:props oldProps:ViewShadowNode::defaultSharedProps()];
+  [view finalizeUpdates:RNComponentViewUpdateMaskProps];
+
+  return view;
+}
+
+- (void)testSquareSolidOutlineUsesCoreAnimationBorder
+{
+  // Solid outlines keep the cheaper Core Animation path.
+  RCTViewComponentView *view = makeViewWithOutlineStyle(OutlineStyle::Solid);
+  CALayer *outlineLayer = [view valueForKey:@"_outlineLayer"];
+
+  XCTAssertNotNil(outlineLayer);
+  XCTAssertEqualWithAccuracy(outlineLayer.borderWidth, 8.0, 0.001);
+  XCTAssertNil(outlineLayer.contents);
+}
+
+- (void)testSquareDottedAndDashedOutlinesAreDrawnWithCoreGraphics
+{
+  // A view without border radii used to take the Core Animation path, which can
+  // only render solid contours, so `outlineStyle` was silently dropped.
+  for (OutlineStyle outlineStyle : {OutlineStyle::Dotted, OutlineStyle::Dashed}) {
+    RCTViewComponentView *view = makeViewWithOutlineStyle(outlineStyle);
+    CALayer *outlineLayer = [view valueForKey:@"_outlineLayer"];
+
+    XCTAssertNotNil(outlineLayer);
+    XCTAssertEqualWithAccuracy(outlineLayer.borderWidth, 0.0, 0.001);
+    XCTAssertNotNil(outlineLayer.contents);
+  }
 }
 
 @end

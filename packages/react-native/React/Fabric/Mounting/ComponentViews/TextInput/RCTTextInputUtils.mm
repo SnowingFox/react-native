@@ -43,6 +43,7 @@ void RCTCopyBackedTextInput(
   toTextInput.scrollEnabled = fromTextInput.scrollEnabled;
   toTextInput.secureTextEntry = fromTextInput.secureTextEntry;
   toTextInput.keyboardType = fromTextInput.keyboardType;
+  toTextInput.returnKeyType = fromTextInput.returnKeyType;
   toTextInput.textContentType = fromTextInput.textContentType;
   toTextInput.smartInsertDeleteType = fromTextInput.smartInsertDeleteType;
   toTextInput.passwordRules = fromTextInput.passwordRules;
@@ -295,7 +296,7 @@ UIDataDetectorTypes RCTUITextViewDataDetectorTypesFromStringVector(const std::ve
   for (const auto &dataType : dataDetectorTypes) {
     NSNumber *val = dataDetectorTypesMap[RCTNSStringFromString(dataType)];
     if (val) {
-      ret |= (UIDataDetectorTypes)val.unsignedIntValue;
+      ret |= (UIDataDetectorTypes)val.unsignedIntegerValue;
     }
   }
   return ret;

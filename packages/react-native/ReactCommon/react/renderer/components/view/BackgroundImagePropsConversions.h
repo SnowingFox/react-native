@@ -7,10 +7,11 @@
 
 #pragma once
 
-#include <react/featureflags/ReactNativeFeatureFlags.h>
-#include <react/renderer/core/PropsParserContext.h>
-#include <react/renderer/core/RawProps.h>
-#include <react/renderer/graphics/BackgroundImage.h>
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/Graphics.h>
+#include <React/RendererCore.h>
+#include <react/featureflags/ReactNativePublicFeatureFlags.h>
 
 namespace facebook::react {
 
@@ -28,7 +29,7 @@ void parseUnprocessedBackgroundImageString(const std::string &value, std::vector
 
 inline void fromRawValue(const PropsParserContext &context, const RawValue &value, std::vector<BackgroundImage> &result)
 {
-  if (ReactNativeFeatureFlags::enableNativeCSSParsing()) {
+  if (ReactNativeFeatureFlags_DO_NOT_USE::enableNativeCSSParsing()) {
     if (value.hasType<std::string>()) {
       parseUnprocessedBackgroundImageString((std::string)value, result);
     } else if (value.hasType<std::vector<RawValue>>()) {

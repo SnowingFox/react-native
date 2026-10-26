@@ -7,9 +7,13 @@
 
 #pragma once
 
-#include <ReactCommon/CallInvoker.h>
-#include <react/renderer/core/ReactPrimitives.h>
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/CallInvoker.h>
+#include <React/RendererCore.h>
+
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 

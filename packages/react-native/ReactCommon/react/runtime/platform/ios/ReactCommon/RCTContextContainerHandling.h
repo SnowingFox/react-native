@@ -5,9 +5,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #import <Foundation/Foundation.h>
 
-#import <react/utils/ContextContainer.h>
+#import <React/Utils.h>
 
 @protocol RCTContextContainerHandling <NSObject>
 

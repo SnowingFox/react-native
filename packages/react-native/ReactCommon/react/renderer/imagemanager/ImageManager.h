@@ -7,13 +7,15 @@
 
 #pragma once
 
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
 #include <memory>
 
-#include <react/renderer/core/ReactPrimitives.h>
+#include <React/RendererCore.h>
+#include <React/Utils.h>
 #include <react/renderer/imagemanager/ImageRequest.h>
 #include <react/renderer/imagemanager/ImageRequestParams.h>
 #include <react/renderer/imagemanager/primitives.h>
-#include <react/utils/ContextContainer.h>
 
 namespace facebook::react {
 

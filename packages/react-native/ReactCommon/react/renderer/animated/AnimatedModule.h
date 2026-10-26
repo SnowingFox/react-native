@@ -7,16 +7,18 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #if __has_include("FBReactNativeSpecJSI.h") // CocoaPod headers on Apple
 #include "FBReactNativeSpecJSI.h"
 #else
 #include <FBReactNativeSpec/FBReactNativeSpecJSI.h>
 #endif
-#include <ReactCommon/TurboModuleWithJSIBindings.h>
+#include <React/NativeModuleCore.h>
+#include <React/RendererCore.h>
 #include <folly/dynamic.h>
 #include <react/renderer/animated/NativeAnimatedNodesManager.h>
 #include <react/renderer/animated/NativeAnimatedNodesManagerProvider.h>
-#include <react/renderer/core/ReactPrimitives.h>
 #include <memory>
 #include <string>
 #include <variant>

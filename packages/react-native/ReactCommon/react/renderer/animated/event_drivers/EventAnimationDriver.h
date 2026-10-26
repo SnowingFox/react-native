@@ -5,14 +5,15 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 /*
  * Adapted from react-native-windows under the MIT license.
  */
 
 #pragma once
 
-#include <react/renderer/core/EventPayload.h>
-#include <react/renderer/core/ReactPrimitives.h>
+#include <React/RendererCore.h>
 #include <optional>
 #include <string>
 #include <vector>

@@ -7,10 +7,12 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <vector>
 
+#include <React/Utils.h>
 #include <react/renderer/telemetry/TransactionTelemetry.h>
-#include <react/utils/Telemetry.h>
 
 namespace facebook::react {
 

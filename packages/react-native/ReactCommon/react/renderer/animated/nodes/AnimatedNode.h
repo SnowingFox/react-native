@@ -5,15 +5,17 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 /*
  * Adapted from react-native-windows under the MIT license.
  */
 
 #pragma once
 
+#include <React/Debug.h>
+#include <React/RendererCore.h>
 #include <folly/dynamic.h>
-#include <react/debug/flags.h>
-#include <react/renderer/core/ReactPrimitives.h>
 
 namespace facebook::react {
 

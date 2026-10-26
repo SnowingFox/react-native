@@ -4,10 +4,11 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @flow
+ * @flow strict-local
  * @format
  */
 
+import type {UnsafeObject} from '../Types/CodegenTypes';
 import type {UIManagerJSInterface} from '../Types/UIManagerJSInterface';
 
 import {getFabricUIManager} from './FabricUIManager';
@@ -23,9 +24,7 @@ const UIManagerImpl: UIManagerJSInterface =
     ? require('./BridgelessUIManager').default
     : require('./PaperUIManager').default;
 
-// $FlowFixMe[cannot-spread-interface]
-const UIManager: UIManagerJSInterface = {
-  ...UIManagerImpl,
+const UIManagerOverrides = {
   /**
    * Determines the location on screen, width, and height of the given view and
    * returns the values via an async callback. If successful, the callback will
@@ -60,7 +59,7 @@ const UIManager: UIManagerJSInterface = {
       const FabricUIManager = nullthrows(getFabricUIManager());
       const shadowNode =
         FabricUIManager.findShadowNodeByTag_DEPRECATED(reactTag);
-      if (shadowNode) {
+      if (shadowNode != null) {
         FabricUIManager.measure(shadowNode, callback);
       } else {
         console.warn(`measure cannot find view with tag #${reactTag}`);
@@ -103,7 +102,7 @@ const UIManager: UIManagerJSInterface = {
       const FabricUIManager = nullthrows(getFabricUIManager());
       const shadowNode =
         FabricUIManager.findShadowNodeByTag_DEPRECATED(reactTag);
-      if (shadowNode) {
+      if (shadowNode != null) {
         FabricUIManager.measureInWindow(shadowNode, callback);
       } else {
         console.warn(`measure cannot find view with tag #${reactTag}`);
@@ -129,7 +128,7 @@ const UIManager: UIManagerJSInterface = {
   measureLayout(
     reactTag: number,
     ancestorReactTag: number,
-    errorCallback: (error: Object) => void,
+    errorCallback: (error: UnsafeObject) => void,
     callback: (
       left: number,
       top: number,
@@ -144,7 +143,7 @@ const UIManager: UIManagerJSInterface = {
       const ancestorShadowNode =
         FabricUIManager.findShadowNodeByTag_DEPRECATED(ancestorReactTag);
 
-      if (!shadowNode || !ancestorShadowNode) {
+      if (shadowNode == null || ancestorShadowNode == null) {
         return;
       }
 
@@ -167,7 +166,7 @@ const UIManager: UIManagerJSInterface = {
 
   measureLayoutRelativeToParent(
     reactTag: number,
-    errorCallback: (error: Object) => void,
+    errorCallback: (error: UnsafeObject) => void,
     callback: (
       left: number,
       top: number,
@@ -182,7 +181,7 @@ const UIManager: UIManagerJSInterface = {
       const FabricUIManager = nullthrows(getFabricUIManager());
       const shadowNode =
         FabricUIManager.findShadowNodeByTag_DEPRECATED(reactTag);
-      if (shadowNode) {
+      if (shadowNode != null) {
         FabricUIManager.measure(
           shadowNode,
           (left, top, width, height, pageX, pageY) => {
@@ -210,6 +209,8 @@ const UIManager: UIManagerJSInterface = {
   dispatchViewManagerCommand(
     reactTag: number,
     commandName: number | string,
+    /* $FlowFixMe[unclear-type] Flow arrays are invariant, so a precise element
+     * type would reject callers passing an already-typed array. */
     commandArgs: any[],
   ) {
     // Sometimes, libraries directly pass in the output of `findNodeHandle` to
@@ -224,12 +225,16 @@ const UIManager: UIManagerJSInterface = {
       const FabricUIManager = nullthrows(getFabricUIManager());
       const shadowNode =
         FabricUIManager.findShadowNodeByTag_DEPRECATED(reactTag);
-      if (shadowNode) {
+      if (shadowNode != null) {
         // Transform the accidental CommandID into a CommandName which is the stringified number.
         // The interop layer knows how to convert this number into the right method name.
         // Stringify a string is a no-op, so it's safe.
-        commandName = `${commandName}`;
-        FabricUIManager.dispatchCommand(shadowNode, commandName, commandArgs);
+        const resolvedCommandName = `${commandName}`;
+        FabricUIManager.dispatchCommand(
+          shadowNode,
+          resolvedCommandName,
+          commandArgs,
+        );
       }
     } else {
       UIManagerImpl.dispatchViewManagerCommand(
@@ -242,5 +247,20 @@ const UIManager: UIManagerJSInterface = {
     }
   },
 };
+
+// Copy property descriptors instead of spreading UIManagerImpl. In Bridgeless
+// mode, UIManagerImpl may define enumerable lazy ViewManager getters. Spreading
+// the object would invoke every getter during module initialization.
+// $FlowFixMe[incompatible-type] Flow cannot infer properties from descriptors.
+const UIManager: UIManagerJSInterface = Object.create(
+  Object.getPrototypeOf(UIManagerImpl),
+  {
+    ...Object.getOwnPropertyDescriptors(
+      // $FlowFixMe[class-object-subtyping] UIManagerImpl is a runtime object.
+      UIManagerImpl,
+    ),
+    ...Object.getOwnPropertyDescriptors(UIManagerOverrides),
+  },
+);
 
 export default UIManager;

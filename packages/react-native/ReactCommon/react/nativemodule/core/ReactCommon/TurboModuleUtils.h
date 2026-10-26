@@ -7,8 +7,10 @@
 
 #pragma once
 
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
+#include <React/Bridging.h>
 #include <jsi/jsi.h>
-#include <react/bridging/LongLivedObject.h>
 #include <cassert>
 #include <functional>
 #include <string>

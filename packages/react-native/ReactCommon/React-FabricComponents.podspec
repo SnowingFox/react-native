@@ -33,6 +33,18 @@ if ENV['USE_FRAMEWORKS']
     "\"$(PODS_TARGET_SRCROOT)/react/renderer/components/text/platform/cxx\"",
     "\"$(PODS_TARGET_SRCROOT)/react/renderer/components/view/platform/cxx\"",
   ]
+
+  if ReactNativeCoreUtils.build_rncore_from_source()
+    # Stable umbrellas consumed by exported component headers.
+    header_search_path = header_search_path + [
+      "\"$(PODS_TARGET_SRCROOT)/react/debug\"",
+      "\"$(PODS_TARGET_SRCROOT)/react/renderer/components/view\"",
+      "\"$(PODS_TARGET_SRCROOT)/react/renderer/core\"",
+      "\"$(PODS_TARGET_SRCROOT)/react/renderer/debug\"",
+      "\"$(PODS_TARGET_SRCROOT)/react/renderer/graphics\"",
+      "\"$(PODS_TARGET_SRCROOT)/react/utils\"",
+    ]
+  end
 end
 
 Pod::Spec.new do |s|
@@ -60,6 +72,7 @@ Pod::Spec.new do |s|
   s.dependency "React-logger"
   s.dependency "React-Core"
   s.dependency "React-debug"
+  s.dependency "React-cxxstableapi"
   s.dependency "React-featureflags"
   s.dependency "React-utils"
   s.dependency "React-runtimescheduler"
@@ -69,11 +82,11 @@ Pod::Spec.new do |s|
   add_dependency(s, "React-RCTFBReactNativeSpec")
   add_dependency(s, "React-rendererdebug")
   add_dependency(s, "React-graphics", :additional_framework_paths => ["react/renderer/graphics/platform/ios"])
+  add_dependency(s, "React-ImageManager", :additional_framework_paths => ["react/renderer/imagemanager/platform/ios"])
   add_dependency(s, "React-Fabric", :additional_framework_paths => [
     "react/renderer/components/scrollview/platform/cxx",
     "react/renderer/components/scrollview/platform/ios",
-    "react/renderer/components/view/platform/cxx",
-    "react/renderer/imagemanager/platform/ios"
+    "react/renderer/components/view/platform/cxx"
   ])
 
   depend_on_js_engine(s)
@@ -160,4 +173,6 @@ Pod::Spec.new do |s|
                               "react/renderer/textlayoutmanager/platform/cxx"
     ss.header_dir           = "react/renderer/textlayoutmanager"
   end
+
+  mark_as_react_native_build(s)
 end

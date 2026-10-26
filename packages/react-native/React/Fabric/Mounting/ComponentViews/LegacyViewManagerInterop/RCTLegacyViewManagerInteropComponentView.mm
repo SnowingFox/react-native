@@ -15,6 +15,7 @@
 #import <React/UIView+React.h>
 #import <react/renderer/components/legacyviewmanagerinterop/LegacyViewManagerInteropComponentDescriptor.h>
 #import <react/renderer/components/legacyviewmanagerinterop/LegacyViewManagerInteropViewProps.h>
+#import <react/renderer/components/legacyviewmanagerinterop/RCTLegacyViewManagerInteropCoordinator.h>
 #import <react/utils/ManagedObjectWrapper.h>
 #import "RCTLegacyViewManagerInteropCoordinatorAdapter.h"
 
@@ -130,9 +131,10 @@ static NSString *const kRCTLegacyInteropChildIndexKey = @"index";
 
   for (Class moduleClass in registeredModules) {
     id<RCTBridgeModule> bridgeModule = (id<RCTBridgeModule>)moduleClass;
-    NSString *moduleName = [[bridgeModule moduleName] isEqualToString:@""]
+    NSString *exportedName = [bridgeModule respondsToSelector:@selector(moduleName)] ? [bridgeModule moduleName] : nil;
+    NSString *moduleName = exportedName.length == 0
         ? [NSStringFromClass(moduleClass) stringByReplacingOccurrencesOfString:@"Manager" withString:@""]
-        : [bridgeModule moduleName];
+        : exportedName;
 
     if (supportedLegacyViewComponents[moduleName] == NULL) {
       supportedLegacyViewComponents[moduleName] = moduleClass;

@@ -12,6 +12,11 @@
 
 #import <React/RCTBackedTextInputDelegateAdapter.h>
 
+@interface RCTBackedTextViewDelegateAdapter (PendingTextInputEdit)
+- (void)invalidatePendingTextInputEdit;
+- (void)schedulePendingTextInputEditWithRange:(NSRange)range replacementText:(NSString *)replacementText;
+@end
+
 @implementation RCTUITextView {
   UILabel *_placeholderView;
   UITextView *_detachedTextView;
@@ -207,10 +212,42 @@ static UIColor *defaultPlaceholderColor(void)
   [super setSelectedTextRange:selectedTextRange];
 }
 
+- (void)rct_invalidatePendingTextInputEdit
+{
+  [_textInputDelegateAdapter invalidatePendingTextInputEdit];
+}
+
+- (void)rct_enqueueTextInputEditWithRange:(NSRange)range replacementText:(NSString *)replacementText
+{
+  [_textInputDelegateAdapter schedulePendingTextInputEditWithRange:range replacementText:replacementText];
+}
+
 // After restoring the previous cursor position, we manually trigger the scroll to the new cursor position (PR 38679).
 - (void)scrollRangeToVisible:(NSRange)range
 {
   [super scrollRangeToVisible:range];
+}
+
+// When scrollEnabled is true, UIKit's caret reveal only scrolls UITextView and not enclosing ScrollViews, so a caret
+// can remain obscured by the keyboard. Therefore we forward the reveal upward to the nearest scrollable ancestor.
+- (void)scrollRectToVisible:(CGRect)rect animated:(BOOL)animated
+{
+  [super scrollRectToVisible:rect animated:animated];
+
+  if (!self.isFirstResponder) {
+    return;
+  }
+
+  UIScrollView *scrollableAncestor = [self nearestScrollableAncestor];
+  if (scrollableAncestor == nil) {
+    return;
+  }
+
+  // Expand the caret height by 4 on top and bottom so it has sufficient padding to avoid touching the keyboard border.
+  // This matches UIKit behavior for UITextView when scrollEnabled is false.
+  CGRect caretRect = [scrollableAncestor convertRect:CGRectInset(rect, 0, -4) fromView:self];
+
+  [scrollableAncestor scrollRectToVisible:caretRect animated:animated];
 }
 
 - (void)paste:(id)sender
@@ -311,6 +348,15 @@ static UIColor *defaultPlaceholderColor(void)
   return [super canPerformAction:action withSender:sender];
 }
 
+// UIKit queries this when the keyboard becomes active, including when the app returns to the
+// foreground. The default implementation calls `canPerformAction:` with `paste:`, which
+// synchronously queries the system pasteboard on the main thread and can hang the app. TextInput
+// only accepts text, so opt out of image paste; text paste is unaffected.
+- (BOOL)supportsImagePaste
+{
+  return NO;
+}
+
 - (void)buildMenuWithBuilder:(id<UIMenuBuilder>)builder
 {
 #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000 && !TARGET_OS_TV
@@ -378,5 +424,15 @@ static UIColor *defaultPlaceholderColor(void)
 }
 
 #pragma mark - Utility Methods
+
+- (nullable UIScrollView *)nearestScrollableAncestor
+{
+  for (UIView *superview = self.superview; superview != nil; superview = superview.superview) {
+    if ([superview isKindOfClass:[UIScrollView class]] && ((UIScrollView *)superview).isScrollEnabled) {
+      return (UIScrollView *)superview;
+    }
+  }
+  return nil;
+}
 
 @end

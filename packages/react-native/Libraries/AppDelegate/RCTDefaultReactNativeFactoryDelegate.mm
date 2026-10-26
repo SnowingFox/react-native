@@ -66,7 +66,7 @@
 
 - (NSURL *_Nullable)bundleURL
 {
-  [NSException raise:@"RCTAppDelegate::bundleURL not implemented"
+  [NSException raise:@"RCTReactNativeFactoryDelegate::bundleURL not implemented"
               format:@"Subclasses must implement a valid getBundleURL method"];
   return nullptr;
 }
@@ -112,21 +112,6 @@
 #pragma mark - RCTArchConfiguratorProtocol
 
 - (BOOL)newArchEnabled
-{
-  return YES;
-}
-
-- (BOOL)bridgelessEnabled
-{
-  return YES;
-}
-
-- (BOOL)fabricEnabled
-{
-  return YES;
-}
-
-- (BOOL)turboModuleEnabled
 {
   return YES;
 }

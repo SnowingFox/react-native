@@ -7,14 +7,16 @@
 
 #pragma once
 
+#include <react/cxxstableapi/UmbrellaGuard.h>
+
 #include <memory>
 #include <string>
 #include <unordered_map>
 
 #include <jsi/jsi.h>
 
-#include <ReactCommon/CallInvoker.h>
-#include <react/bridging/EventEmitter.h>
+#include <React/Bridging.h>
+#include <React/CallInvoker.h>
 
 namespace facebook::react {
 

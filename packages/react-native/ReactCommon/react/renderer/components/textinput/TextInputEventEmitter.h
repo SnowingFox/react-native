@@ -7,8 +7,10 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/View.h>
 #include <react/renderer/attributedstring/AttributedString.h>
-#include <react/renderer/components/view/ViewEventEmitter.h>
 
 namespace facebook::react {
 
@@ -27,6 +29,7 @@ class TextInputEventEmitter : public ViewEventEmitter {
     int eventCount;
     Size layoutMeasurement;
     Float zoomScale;
+    bool responderIgnoreScroll{false};
     Tag target;
   };
 

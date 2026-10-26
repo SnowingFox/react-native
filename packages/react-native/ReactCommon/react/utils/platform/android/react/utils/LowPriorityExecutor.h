@@ -7,6 +7,10 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <functional>
+
 namespace facebook::react::LowPriorityExecutor {
 
 void execute(std::function<void()> &&workItem);

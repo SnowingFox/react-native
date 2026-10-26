@@ -7,11 +7,12 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
 #include <mutex>
 #include <shared_mutex>
 
-#include <react/renderer/core/EventPayload.h>
-#include <react/renderer/core/ReactPrimitives.h>
+#include <React/RendererCore.h>
 
 namespace facebook::react {
 

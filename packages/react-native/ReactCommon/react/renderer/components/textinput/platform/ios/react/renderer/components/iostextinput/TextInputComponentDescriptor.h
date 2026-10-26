@@ -7,8 +7,10 @@
 
 #pragma once
 
+#include <react/cxxstableapi/PrivateGuard.h>
+
+#include <React/RendererCore.h>
 #include <react/renderer/components/iostextinput/TextInputShadowNode.h>
-#include <react/renderer/core/ConcreteComponentDescriptor.h>
 
 namespace facebook::react {
 

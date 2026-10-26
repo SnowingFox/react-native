@@ -7,8 +7,12 @@
 
 #pragma once
 
+#include <react/cxxstableapi/FrameworksGuard.h>
+
+#include <React/RendererCore.h>
+#include <React/Timing.h>
+
 #include <react/renderer/components/root/RootShadowNode.h>
-#include "UIManager.h"
 
 namespace facebook::react {
 
