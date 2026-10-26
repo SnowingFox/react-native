@@ -41,13 +41,13 @@ describe('Settings', () => {
 
   it('defers accessing Platform until a method is first invoked', () => {
     let platformAccessCount = 0;
-    jest.doMock('../../Utilities/Platform', () => ({
-      __esModule: true,
-      get default() {
-        platformAccessCount++;
-        return {OS: 'android'};
-      },
-    }));
+    jest.doMock('../../Utilities/Platform', () => {
+      platformAccessCount++;
+      return {
+        __esModule: true,
+        default: {OS: 'android'},
+      };
+    });
 
     const Settings = require('../Settings.js').default;
     expect(platformAccessCount).toBe(0);

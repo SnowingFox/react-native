@@ -28,7 +28,7 @@ function getSettings(): SettingsStatic {
   } else {
     SettingsImpl = require('./SettingsFallback').default;
   }
-  return (SettingsImpl: SettingsStatic);
+  return SettingsImpl as SettingsStatic;
 }
 
 const Settings: SettingsStatic = {
